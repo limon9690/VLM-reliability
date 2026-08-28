@@ -6,3 +6,4 @@ checkpoints/
 *.pth
 .DS_Store
 data/
+features/
