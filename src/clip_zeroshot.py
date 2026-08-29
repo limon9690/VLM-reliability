@@ -64,3 +64,12 @@ def load_cached_features(image_path, text_path):
 
     return {"image_features": image_features, "labels": labels, "text_features": text_features}
 
+def load_cached_image_features(path):
+    cached = torch.load(path)
+    image_features = cached["image_features"]
+    labels = cached["labels"]
+    return {"image_features": image_features, "labels": labels}
+
+def load_cached_text_features(path):
+    text_features = torch.load(path)
+    return {"text_features": text_features}
