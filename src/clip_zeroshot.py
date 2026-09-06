@@ -14,14 +14,13 @@ def build_and_cache_text_features(model, tokenizer, classnames, templates, devic
             text_features.append(class_embedding)
 
         text_features = torch.stack(text_features, dim=1).cpu()
-        saved_path = f"{cache_dir}/{file_name}.pt"
 
+    saved_path = f"{cache_dir}/{file_name}.pt"
     torch.save(text_features.cpu(), saved_path)
     print(f"Text features has been saved at {saved_path}")
 
     return text_features
 
-    
 
 
 def build_and_cache_image_features(model, device, dataloader, cache_dir, file_name):
@@ -40,10 +39,10 @@ def build_and_cache_image_features(model, device, dataloader, cache_dir, file_na
 
     image_features = torch.cat(image_features)
     image_labels = torch.cat(image_labels)
-    saved_path = f"{cache_dir}/{file_name}.pt"
 
     features = {"image_features": image_features, "labels": image_labels}
 
+    saved_path = f"{cache_dir}/{file_name}.pt"
     torch.save(features, saved_path)
     print(f"Image features and labels has been saved at {saved_path}")
 
