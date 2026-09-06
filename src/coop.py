@@ -6,6 +6,7 @@ from open_clip.transformer import text_global_pool
 class PromptLearner(nn.Module):
   def __init__(self, clip_model, device, n_ctx, tokenizer, ctx_dim, class_names):
     super().__init__()
+
     placeholder = "X " * n_ctx
     prompts = [f"{placeholder}{name}." for name in class_names]
     tokenized_prompts = tokenizer(prompts).to(device)
@@ -15,16 +16,28 @@ class PromptLearner(nn.Module):
 
     prefix = embedding[:, :1, :]
     suffix = embedding[:, 1 + n_ctx:, :]
-
     self.register_buffer("prefix", prefix)
     self.register_buffer("suffix", suffix)
     self.register_buffer("tokenized_prompts", tokenized_prompts)
-    self.ctx = nn.Parameter(torch.randn(n_ctx, ctx_dim) * 0.02)
+
+    # --- ctx initialized from "a photo of a" (for TPT) ---
+    ctx_init = "a photo of a"
+    init_tokens = tokenizer(ctx_init).to(device)
+    with torch.no_grad():
+      init_embedding = clip_model.token_embedding(init_tokens)
+
+    ctx_vectors = init_embedding[0, 1:1 + n_ctx, :]
+    self.ctx = nn.Parameter(ctx_vectors.clone())
+
+    self.register_buffer("ctx_init_state", self.ctx.detach().clone())
 
   def forward(self):
     ctx = self.ctx.unsqueeze(0).expand(self.num_classes, -1, -1)
     prompts = torch.cat([self.prefix, ctx, self.suffix], dim=1)
     return prompts, self.tokenized_prompts
+
+  def reset_context(self):
+    self.ctx.data.copy_(self.ctx_init_state)
 
 
 
