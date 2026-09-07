@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 
+
 def tpt_entropy_loss(logits, top_k_fraction=0.1):
     log_probs = F.log_softmax(logits, dim=-1)
     probs = log_probs.exp()

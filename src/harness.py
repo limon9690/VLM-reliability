@@ -1,4 +1,7 @@
 import torch
+from tpt import tpt_entropy_loss
+import torchvision.transforms as transforms
+from tqdm.notebook import tqdm
 
 
 def evaluate(logits, labels, metrics):
@@ -21,6 +24,43 @@ def coop_logits(test_features, coop_text_features, logit_scale, **cfg):
     return logit_scale * (test_features @ coop_text_features.t())
 
 
+def run_tpt(model, prompt_learner, text_encoder, preprocess, raw_images, true_labels, device, augment_transform, n_views=63, lr=0.005, top_k=0.1, subset=200):
+    correct, total = 0, 0
+    for i in tqdm(range(min(subset, len(raw_images)))):
+        image = raw_images[i]
+        label = true_labels[i]
+
+        prompt_learner.reset_context()
+        optimizer = torch.optim.AdamW(prompt_learner.parameters(), lr=lr)
+
+
+        views = generate_N_views(n_views, augment_transform, preprocess, image).to(device)
+        img_feats = model.encode_image(views)
+        img_feats = img_feats / img_feats.norm(dim=-1, keepdim=True)
+        prompts, tok = prompt_learner()
+        txt = text_encoder(prompts, tok)
+        txt = txt / txt.norm(dim=-1, keepdim=True)
+        logits = img_feats @ txt.t()
+        loss = tpt_entropy_loss(logits, top_k)          
+        optimizer.zero_grad(); loss.backward(); optimizer.step()
+
+
+        with torch.no_grad():
+            clean = preprocess(image.convert("RGB")).unsqueeze(0).to(device)
+            cf = model.encode_image(clean); cf = cf / cf.norm(dim=-1, keepdim=True)
+            prompts, tok = prompt_learner()
+            txt = text_encoder(prompts, tok); txt = txt / txt.norm(dim=-1, keepdim=True)
+            pred = (cf @ txt.t()).argmax(dim=-1)
+
+        correct += (pred.item() == label)
+        total += 1
+
+        del views, img_feats, logits, loss, txt, prompts
+        torch.cuda.empty_cache()
+
+    return {"accuracy": 100 * correct / total, "n": total}
+
+
 def run_comparison(shared, methods, metrics):
     results = {}
     for name, spec in methods.items():
@@ -28,3 +68,9 @@ def run_comparison(shared, methods, metrics):
         results[name] = evaluate(logits, shared["labels"], metrics)
     return results
 
+
+def generate_N_views(N, transform_fn, preprocess, image):
+    views = [transform_fn(image) for _ in range(N)]
+    clean = preprocess(image)   
+    views.append(clean)
+    return torch.stack(views)
