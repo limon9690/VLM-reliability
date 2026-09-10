@@ -36,6 +36,57 @@ filter would keep. The interesting version of pseudo-labeling here isn't
 since the raw signal already contains more correct information than its face
 value suggests.
 
+---
+
+## Q2 — Does DANN-style adversarial alignment do anything on frozen CLIP features?
+
+DANN removes domain-discriminative structure from features so a classifier
+can't tell which domain a sample came from — the idea being that domain signal
+doesn't transfer. Its precondition: there has to _be_ linearly-accessible domain
+structure in the features to remove. Since CLIP is frozen (backbone can't be
+retrained), the first question is just whether that structure exists at all.
+
+Probe: train a balanced logistic regression to predict _domain identity_ (not
+class) from cached image features, held-out split, with a shuffled-label null
+control on each pair. Chance = 0.50; the **gap** (real − null) is the domain
+signal and is the only cross-pair-comparable number.
+
+| domain pair (source vs shift) | real  | null  | gap    |
+| ----------------------------- | ----- | ----- | ------ |
+| v2 vs Sketch                  | 0.991 | 0.496 | +0.495 |
+| v2 vs R                       | 0.957 | 0.500 | +0.457 |
+| R vs Sketch                   | 0.894 | 0.498 | +0.395 |
+| PACS photo vs Sketch          | 1.000 | 0.492 | +0.508 |
+
+The domain gap is **large and consistent across every shift tested** — the DANN
+precondition is met everywhere, not just for one shift type. Frozen CLIP
+features are _not_ domain-invariant; a trivial linear classifier separates
+source from shifted domain near-perfectly. (v2 is a near-source photo domain,
+mildly shifted itself — not a pure origin — so read it as "photo-ish source.")
+
+So the interesting question isn't "is there a gap for alignment to grab?" (yes,
+plainly). It's: **if the domain gap is this linearly obvious, why does the
+field's toolkit — CoOp, Tip-Adapter, TPT — do prompt-tuning and test-time
+entropy minimization, and not feature alignment at all?** That absence, given
+how accessible the gap is, is the real thread for the map.
+
+**Caveat 1 (the likely answer to that question):** separable ≠
+removable-without-damage. A domain signal this strong is probably entangled
+with class-discriminative signal; stripping it DANN-style may destroy what makes
+classification work. That entanglement — not absence of a gap — is the more
+plausible reason feature alignment fell out of favor when CLIP arrived.
+
+**Caveat 2:** this measures _linear_ separability. A non-result would not rule
+out non-linear structure — but every result here is strongly positive, so that
+doesn't bite.
+
+**Secondary note:** sketch pairs (0.99–1.00) sit slightly above the rendition
+pair (0.96), directionally consistent with the Month-2 sketch-is-hardest
+finding — but all are near ceiling, so the ordering is weak evidence, not a
+clean result.
+
+---
+
 ## Q4 — Where do test-time methods go unstable with CLIP, and what stabilizes them?
 
 TPT's ECE (8.65%) is worse than zero-shot's (6.45%) and worse than the few-shot
