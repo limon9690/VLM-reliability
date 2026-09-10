@@ -87,6 +87,41 @@ clean result.
 
 ---
 
+## Q3 — Which DA/DG/robustness benchmarks have VLM-reliability results, and which don't?
+
+Extracted from the paper-summaries file (not re-read — pulled from existing notes):
+
+| Paper                   | Benchmarks                               | Metric                        | Calibration/reliability?    | Setting                      |
+| ----------------------- | ---------------------------------------- | ----------------------------- | --------------------------- | ---------------------------- |
+| CLIP                    | ImageNet + R/Sketch, ~27 datasets        | Top-1 acc                     | ✗                           | zero-shot                    |
+| CoOp                    | 11-dataset suite, base-to-new            | Top-1 acc                     | ✗                           | few-shot                     |
+| CoCoOp                  | base-to-new, cross-dataset, DG           | Top-1 acc                     | ✗                           | few-shot (input-conditional) |
+| Tip-Adapter             | few-shot suite, ImageNet-R               | Top-1 acc                     | ✗                           | few-shot, training-free      |
+| TPT                     | ImageNet-{A,R,V2,Sketch}                 | Top-1 acc                     | ✗                           | test-time                    |
+| WiSE-FT                 | ImageNet + shifts                        | acc, effective robustness     | robustness ✓, calibration ✗ | fine-tune + weight interp    |
+| ClipTTA                 | TTA benchmarks (not recorded — acc-only) | acc                           | ✗                           | test-time                    |
+| FCL                     | TTA benchmarks (not recorded — acc-only) | acc                           | ✗                           | test-time                    |
+| What Drives TTA (TTABC) | 20+ methods, multiple shifts             | acc + reliability, separately | ✓                           | study / benchmark            |
+
+**The gap: calibration under shift is a near-empty column.** Eight of nine
+entries report accuracy and nothing else. The only one that measures
+reliability separately from accuracy is a 2026 empirical _study_ — not an
+adaptation method proposing anything calibration-aware. Every actual method
+(CoOp, Tip-Adapter, TPT, ClipTTA, FCL) is evaluated by top-1 accuracy alone.
+
+This is exactly where my harness already has numbers. My Q4 finding — TPT
+destroys calibration (ECE 8.65%) while few-shot adaptation improves it — is a
+measurement the entire _method_ literature skipped. The gap isn't "invent a new
+method"; it's "measure the reliability the field left unmeasured, across methods
+that already exist, under shift."
+
+The TTABC study is corroboration, not competition: a 2026 paper stating outright
+that reliability ≠ accuracy under shift and that the field's understanding lags
+its method count — conceding the opening without closing it (it benchmarks, it
+doesn't propose a calibration-aware method).
+
+---
+
 ## Q4 — Where do test-time methods go unstable with CLIP, and what stabilizes them?
 
 TPT's ECE (8.65%) is worse than zero-shot's (6.45%) and worse than the few-shot
