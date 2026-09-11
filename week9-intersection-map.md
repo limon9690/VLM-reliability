@@ -185,13 +185,13 @@ Cell = has calibration/reliability been measured here?
 ✓ = the field measured it. ✗ = nobody did (the gap). [number] = I measured it in
 my harness.
 
-| Method-type                       | in-dist | rendition (R)    | sketch | corruption / other |
-| --------------------------------- | ------- | ---------------- | ------ | ------------------ |
-| zero-shot (inference)             | ✗       | ECE 6.45% (mine) | ✗      | ✗                  |
-| few-shot pre-deploy (CoOp/CoCoOp) | ✗       | ECE 0.76% (mine) | ✗      | ✗                  |
-| cache-based (Tip-Adapter)         | ✗       | ECE 1.09% (mine) | ✗      | ✗                  |
-| param-update TTA (TPT)            | ✗       | ECE 8.65% (mine) | ✗      | ✗                  |
-| weight-interp (WiSE-FT)           | ✗       | ✗                | ✗      | ✗                  |
+| Method-type                       | in-dist | rendition (R)    | sketch          | corruption / other |
+| --------------------------------- | ------- | ---------------- | --------------- | ------------------ |
+| zero-shot (inference)             | ✗       | ECE 6.45% (mine) | ECE 0.95%(mine) | ✗                  |
+| few-shot pre-deploy (CoOp/CoCoOp) | ✗       | ECE 0.76% (mine) | ✗               | ✗                  |
+| cache-based (Tip-Adapter)         | ✗       | ECE 1.09% (mine) | ECE 8.77%(mine) | ✗                  |
+| param-update TTA (TPT)            | ✗       | ECE 8.65% (mine) | ✗               | ✗                  |
+| weight-interp (WiSE-FT)           | ✗       | ✗                | ✗               | ✗                  |
 
 > ✗ = not reported in my paper-summaries. Field-wide calibration reporting is
 > almost absent (see Q3, where 8 of 9 papers report accuracy only).
@@ -204,6 +204,27 @@ finding, confirmed on ImageNet-Sketch and PACS-sketch). So the most valuable
 empty cell is calibration under sketch-shift: the shift where the model is
 weakest is also the shift where nobody has measured whether adaptation helps or
 hurts reliability. That is paper-one's sharpest target.
+
+### Sketch column (Week 10)
+
+| method      | ImageNet-R ECE | ImageNet-Sketch ECE |
+| ----------- | -------------- | ------------------- |
+| zero-shot   | 6.45%          | 0.95%               |
+| Tip-Adapter | 1.09%          | 8.77%               |
+
+CoOp / TPT on sketch: parked (1000-class exceeds free-tier GPU; awaits lab hardware).
+
+**Finding — the calibration effect flips across shift type.** Tip-Adapter
+improves calibration on R (1.09% vs 6.45%) but destroys it on sketch (8.77% vs
+0.95%). Same training-free method, opposite effect, depending only on the shift.
+So adaptation's calibration effect is not a property of the method — it is a
+property of method × shift-type. This is the accuracy-only literature's blind
+spot, on my own numbers.
+
+Note: zero-shot's low sketch ECE (0.95%) is _aggregate_ calibration — mean
+confidence 0.440 ≈ accuracy 0.441. CLIP is unsure and correctly unsure on
+sketch, but this is coin-flip-level accuracy, not trustworthy per-prediction
+confidence. Aggregate-calibrated ≠ useful.
 
 ---
 
