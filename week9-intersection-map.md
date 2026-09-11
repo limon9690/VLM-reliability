@@ -164,6 +164,17 @@ views) move where this instability sits?
 **Caveat:** this binning uses coarser bins and a smaller sample than the ECE
 calculation, so it is a rough breakdown, not an exact one.
 
+Ablation (n=300, ImageNet-R subset): varied TPT's view-selection fraction across
+5% / 10% / 20%. ECE was 7.22% / 8.91% / 8.20% — not monotonic, and within
+subrun noise at this n. The confidence-accuracy shape (mid-range wobble) is
+roughly constant across all three. So TPT's miscalibration does not track
+the selection threshold — it looks intrinsic to the entropy objective, not
+caused by the confidence-selection heuristic. (Accuracy rises slightly as
+selection loosens: 58.7 → 60.7, so the knob has a small accuracy effect but no
+clean calibration effect.) Caveat: n=300, per-image TPT is noisy, and these
+accuracies run below the n=500 headline (~66%), so read the three as comparable
+to each other, not to earlier runs.
+
 ---
 
 ## Q5 — Methods × shift-types: where has reliability actually been measured?
