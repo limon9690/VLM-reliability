@@ -113,3 +113,10 @@ def ece(logits, labels, n_bins=10):
             ece_val += (bin_acc - bin_conf).abs() * prop
 
     return ece_val.item() * 100
+
+
+def signed_gap(logits, labels):
+    probs = logits.softmax(dim=-1)
+    conf, pred = probs.max(dim=-1)
+    acc = (pred == labels).float().mean().item()
+    return conf.mean().item() - acc   # positive = overconfident

@@ -234,9 +234,25 @@ confidence. Aggregate-calibrated ≠ useful.
   underconfident CLIP (Q1). Classical feature alignment has a gap to grab but
   probably cannot use it without breaking classification (Q2). Neither is where
   paper-one should go.
-- Q3 and Q4 point at the same open space from two sides. Q4: I can measure that
-  adaptation changes calibration under shift. Q3: almost nobody else measures
-  this. Q5 draws it as a grid — one column measured (by me), the rest empty.
-- **Leading paper-one direction:** a calibration-first study of when adapting a
-  VLM under shift helps reliability and when it hurts it, across existing methods
-  — with sketch-shift as the sharpest, emptiest cell.
+- Q3 and Q4 point at the same open space: I can measure that adaptation changes
+  calibration under shift (Q4); almost nobody else measures this (Q3). Q5 draws
+  it as a grid — one column measured (by me), the rest empty.
+
+**Week 10 sharpened this into a specific claim.** Two experiments:
+
+1. TPT selection-threshold ablation (5/10/20%): calibration does _not_ track the
+   selection fraction. TPT's miscalibration looks intrinsic to the entropy
+   objective, not caused by the confidence-selection heuristic. This closes a
+   door — the fix is not in the selection step.
+2. Sketch column: Tip-Adapter _improves_ calibration on ImageNet-R (1.09% vs
+   6.45%) but _wrecks_ it on ImageNet-Sketch (8.77% vs 0.95%). Same training-free
+   method, opposite calibration effect, depending only on the shift type.
+
+**Leading paper-one direction (updated):** adaptation's effect on calibration is
+not a property of the method — it is a property of method × shift-type. The same
+method can help reliability under one shift and destroy it under another, and the
+accuracy-only literature cannot see this at all. The Tip-Adapter flip is the
+sharpest single piece of evidence: it is training-free, so the effect cannot be
+blamed on gradient instability — it is the interaction of the adaptation
+mechanism with the shift itself. Sketch remains the emptiest, highest-value shift
+(hardest for CLIP, least measured for reliability).
