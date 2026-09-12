@@ -2,3 +2,9 @@ torch
 numpy
 jupyter
 ipykernel
+
+open_clip_torch
+datasets
+torchvision
+gdown
+scikit-learn

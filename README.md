@@ -7,8 +7,7 @@ Four methods run through one harness: zero-shot CLIP, CoOp, Tip-Adapter, and
 TPT. Each is evaluated on shifted versions of ImageNet and on PACS, reporting
 top-1 accuracy and Expected Calibration Error from the same code path.
 
-Backbone is CLIP ViT-B/16 (OpenAI weights), frozen throughout. Everything runs
-on free-tier Colab/Kaggle GPU.
+Backbone is CLIP ViT-B/16 (OpenAI weights), frozen throughout.
 
 ---
 
@@ -60,11 +59,11 @@ free-tier GPU memory.
 | Setup                      | Top-1  |
 | -------------------------- | ------ |
 | zero-shot (1 template)     | 84.58% |
-| CoOp, all 101 classes      | 90.21% |
-| CoOp, base classes         | 96.79% |
-| CoOp, new (unseen) classes | 91.87% |
+| CoOp, all 101 classes      | 91.42% |
+| CoOp, base classes         | 95.52% |
+| CoOp, new (unseen) classes | 93.14% |
 
-The ~5 point base-to-new gap reproduces CoOp's known generalization weakness.
+The ~2.4 point base-to-new gap reproduces CoOp's known generalization weakness.
 
 ### Calibration direction
 
@@ -110,54 +109,91 @@ of shape `(N, num_classes)`, and metrics are pluggable functions of
 
 ## Running it
 
-<!-- TODO:
-     - environment setup (python version, pip install line)
-     - how to download/point at each dataset
-     - the command that builds the feature cache
-     - the command that reproduces each results table above
-     One command per table row is the goal. -->
+### 1. Clone and set up a Python environment
 
 ```
-# setup
+git clone https://github.com/limon9690/VLM-reliability.git
+cd VLM-reliability
 
-# build feature cache
-
-# reproduce ImageNet-R comparison
-
-# reproduce ImageNet-Sketch comparison
-
-# reproduce CoOp on Caltech101
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 ```
+
+Tested on Python 3.12.
+
+### 2. Install dependencies
+
+```
+pip install -r requirements.txt
+pip install open_clip_torch datasets torchvision gdown scikit-learn
+```
+
+`requirements.txt` covers the notebook/dev tooling (`torch`, `jupyter`, etc).
+The second line installs what `src/` and `scripts/` actually import — CLIP
+backbone, HuggingFace `datasets`, `torchvision`, `gdown`, `scikit-learn` for
+the separability probes in `notebooks/09`. Not folded into the lockfile yet.
+
+### 3. Folder structure
+
+`data/` (raw datasets) and `features/` (cached tensors) are both gitignored
+and empty on a fresh clone; each script creates them and fills in only the
+files it needs. You need a GPU for the first run — feature extraction and
+CoOp training are too slow on CPU to be usable.
+
+### 4. Reproduce a results table
+
+Each script checks `features/` for its cache first and only recomputes what's
+missing, so the first run per dataset is the slow one (feature extraction,
+and for Caltech101, CoOp training) and later runs load straight from cache.
+
+```
+# "Adaptation methods on ImageNet-R" (zero-shot, Tip-Adapter, CoOp, TPT)
+# downloads axiong/imagenet-r from HuggingFace on first run
+python scripts/eval_imagenet_r.py
+
+# "ImageNet-Sketch" (zero-shot, Tip-Adapter)
+# downloads the ImageNet-Sketch mirror via gdown on first run
+python scripts/eval_imagenet_sketch.py
+
+# "CoOp on Caltech101 (16-shot)" (zero-shot, CoOp all-101, CoOp base/new split)
+# downloads Caltech101 via torchvision on first run
+python scripts/eval_caltech_coop.py
+```
+
+All three accept `--data-root <dir>` to change where raw datasets are
+downloaded (default `data/`).
+
+`eval_imagenet_r.py`'s CoOp row is eval-only: it loads a pre-trained context
+vector from `features/coop_ctx_200_cls.pt` rather than training one. That file
+is part of the author's local cache, gitignored like the rest of `features/`,
+and there is currently no script in this repo that reproduces it — a fresh
+clone can run the zero-shot/Tip-Adapter/TPT rows immediately, but needs that
+checkpoint supplied separately to run the CoOp row too.
 
 ---
 
 ## Known limits
 
-- **TPT runs on subsets.** Per-image gradient steps plus 63 augmented views make
-  full-set TPT impractical on free-tier GPU. Reported runs use n=200–500.
-- **TPT's baseline differs.** TPT is compared against a single-template
-  zero-shot baseline, while the other methods use 80-template ensembling. The
-  gain (+1.5 over its own baseline) is real; the absolute number is not
-  comparable across rows.
-- **Tip-Adapter's α and β were tuned on ImageNet-R** and carried over to
-  ImageNet-Sketch without retuning. The Sketch numbers may reflect a poor α for
-  a 1000-class softmax rather than a property of that shift.
-- **Class counts differ across datasets.** ImageNet-R has 200 classes,
-  ImageNet-Sketch 1000. Softmax confidence distributions are not directly
-  comparable across them, which matters for any cross-dataset calibration claim.
-- **ECE numbers come from two implementations** with different bin-edge
-  handling. They are being consolidated into the single `harness.ece`.
-- **CoOp used Adam**, not the SGD + cosine schedule from the paper. Internal
+- TPT ran on n=200–500 subsets, not the full set. Per-image gradient steps
+  plus 63 augmented views make the full set impractical on free-tier GPU.
+- TPT is compared against a single-template zero-shot baseline, while the
+  other methods use 80-template ensembling. The +1.5 gain over its own
+  baseline is real; the absolute number isn't comparable across rows.
+- Tip-Adapter's α and β were tuned on ImageNet-R and carried over to
+  ImageNet-Sketch without retuning. The Sketch numbers may reflect a poor α
+  for a 1000-class softmax more than a property of that shift.
+- ImageNet-R has 200 classes, ImageNet-Sketch has 1000. Softmax confidence
+  distributions aren't directly comparable across them, which matters for any
+  cross-dataset calibration claim.
+- ECE numbers come from two implementations with different bin-edge handling.
+  Being consolidated into `harness.ece` so every number uses one function.
+- CoOp used Adam, not the SGD + cosine schedule from the paper. Internal
   comparisons are consistent; absolute numbers differ slightly from published.
 
 ---
 
 ## Notes
 
-CLIP is frozen in every method here. The pattern across the field — and across
-this repo — is a frozen backbone with a small trainable or training-free piece
-attached: learned prompt context (CoOp), a feature cache (Tip-Adapter), or a
-per-image prompt update with no labels (TPT).
-
-Feature caching is what makes this run on free-tier hardware. Image features are
-extracted once and reused; only the trained side (learned prompts) is recomputed.
+CLIP is frozen in every method here — the pattern across the field is a frozen
+backbone with something small attached: a learned prompt (CoOp), a feature
+cache (Tip-Adapter), or a per-image prompt update with no labels (TPT).
