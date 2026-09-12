@@ -11,6 +11,16 @@ Backbone is CLIP ViT-B/16 (OpenAI weights), frozen throughout.
 
 ---
 
+## About this work
+
+I work on the reliability of vision-language models under distribution shift —
+adapting frozen models like CLIP to new domains with little or no labeled data.
+This repo is the working artifact: it reproduces four adaptation methods and
+measures calibration alongside accuracy, which most work in this area does not
+report. The main finding so far is that adaptation shifts a model's confidence
+in a consistent direction, so whether it improves or damages calibration
+depends on where the model started, not on the method alone.
+
 ## Results
 
 All numbers are my own runs, not copied from papers. Published numbers are shown

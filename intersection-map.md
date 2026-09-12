@@ -196,10 +196,11 @@ my harness.
 > ✗ = not reported in my paper-summaries. Field-wide calibration reporting is
 > almost absent (see Q3, where 8 of 9 papers report accuracy only).
 
-All four of my ECE numbers are on ImageNet-R. So one column has my numbers in it,
-and the rest of the grid is empty.
+The ImageNet-R column is fully measured, by me. The sketch column is partly
+filled (zero-shot and Tip-Adapter); CoOp and TPT there are parked, not absent —
+1000-class training exceeds free-tier GPU. Everything else is empty.
 
-The sketch column is entirely ✗ — and sketch is CLIP's hardest shift (my Month-2
+Sketch is CLIP's hardest shift (my Month-2
 finding, confirmed on ImageNet-Sketch and PACS-sketch). So the most valuable
 empty cell is calibration under sketch-shift: the shift where the model is
 weakest is also the shift where nobody has measured whether adaptation helps or
@@ -225,6 +226,21 @@ Note: zero-shot's low sketch ECE (0.95%) is _aggregate_ calibration — mean
 confidence 0.440 ≈ accuracy 0.441. CLIP is unsure and correctly unsure on
 sketch, but this is coin-flip-level accuracy, not trustworthy per-prediction
 confidence. Aggregate-calibrated ≠ useful.
+
+### Signed gap (Week 11)
+
+`signed_gap` added to `harness.py` — mean confidence − accuracy, positive means
+overconfident. Run on cached R and Sketch logits via `run_comparison`:
+
+| dataset         | zero-shot | Tip-Adapter | change |
+| --------------- | --------- | ----------- | ------ |
+| ImageNet-R      | −6.45     | −0.40       | +6.05  |
+| ImageNet-Sketch | −0.13     | +8.76       | +8.89  |
+
+Same direction on both datasets, so the apparent ECE "flip" is an artifact of
+unsigned ECE plus different baseline positions — not a shift-type effect.
+Magnitude differs (~47%) and the cause is unestablished: could be shift,
+the 200-vs-1000 class confound, or α carried over from R.
 
 ---
 
