@@ -195,8 +195,6 @@ checkpoint supplied separately to run the CoOp row too.
 - ImageNet-R has 200 classes, ImageNet-Sketch has 1000. Softmax confidence
   distributions aren't directly comparable across them, which matters for any
   cross-dataset calibration claim.
-- ECE numbers come from two implementations with different bin-edge handling.
-  Being consolidated into `harness.ece` so every number uses one function.
 - CoOp used Adam, not the SGD + cosine schedule from the paper. Internal
   comparisons are consistent; absolute numbers differ slightly from published.
 

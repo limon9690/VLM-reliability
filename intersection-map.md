@@ -161,8 +161,10 @@ single ECE number hides. What fixes it is still open. One thing worth testing:
 does changing TPT's confidence-selection threshold (top 5% vs 10% vs 20% of
 views) move where this instability sits?
 
-**Caveat:** this binning uses coarser bins and a smaller sample than the ECE
-calculation, so it is a rough breakdown, not an exact one.
+**Caveat:** the 4-bin table above is a display grouping for readability; the ECE
+numbers use 10 equal-width bins. Same implementation, different granularity. The
+TPT rows also use a smaller sample (n=500 subset) than the full-set zero-shot
+numbers.
 
 Ablation (n=300, ImageNet-R subset): varied TPT's view-selection fraction across
 5% / 10% / 20%. ECE was 7.22% / 8.91% / 8.20% — not monotonic, and within
