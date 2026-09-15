@@ -119,4 +119,4 @@ def signed_gap(logits, labels):
     probs = logits.softmax(dim=-1)
     conf, pred = probs.max(dim=-1)
     acc = (pred == labels).float().mean().item()
-    return conf.mean().item() - acc   # positive = overconfident
+    return (conf.mean().item() - acc) * 100  # positive = overconfident

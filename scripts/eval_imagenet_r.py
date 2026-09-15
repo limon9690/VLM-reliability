@@ -45,6 +45,7 @@ from harness import (
     run_tpt,
     tip_adapter_logits,
     zero_shot_logits,
+    signed_gap,
 )
 from imagenet_classes import IMAGENET_TEMPLATES
 
@@ -209,7 +210,7 @@ def main():
         "logit_scale": model.logit_scale.exp(),
         "coop_text_features": coop_text_features.to(device),
     }
-    metrics = {"accuracy": accuracy, "ece": ece}
+    metrics = {"accuracy": accuracy, "ece": ece, "signed_gap": signed_gap}
     methods = {
         "zero_shot": {"fn": zero_shot_logits, "params": {}},
         "tip_adapter": {"fn": tip_adapter_logits, "params": {"alpha": TIP_ADAPTER_ALPHA, "beta": TIP_ADAPTER_BETA}},
@@ -226,7 +227,7 @@ def main():
     for method, r in results.items():
         n = r.get("n", len(eval_labels))
         name = DISPLAY_NAMES.get(method, method)
-        print(f"{name:12s}: top-1 {r['accuracy']:.2f}%  ECE {r['ece']:.2f}%  (n={n})")
+        print(f"{name:12s}: top-1 {r['accuracy']:.2f}%  ECE {r['ece']:.2f}% Signed-Gap {r['signed_gap']:.2f}% (n={n})")
 
 
 if __name__ == "__main__":

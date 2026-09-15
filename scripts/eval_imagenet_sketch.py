@@ -39,7 +39,7 @@ from clip_zeroshot import (
     load_cached_text_features,
 )
 from datasets_sketch import load_imagenet_sketch
-from harness import accuracy, ece, run_comparison, tip_adapter_logits, zero_shot_logits
+from harness import accuracy, ece, run_comparison, tip_adapter_logits, zero_shot_logits, signed_gap
 from imagenet_classes import IMAGENET_CLASS_NAMES, IMAGENET_TEMPLATES
 
 import open_clip
@@ -183,7 +183,7 @@ def main():
         "cache_values": cache_values.to(device),
         "logit_scale": model.logit_scale.exp(),
     }
-    metrics = {"accuracy": accuracy, "ece": ece}
+    metrics = {"accuracy": accuracy, "ece": ece, "signed_gap": signed_gap}
     methods = {
         "zero_shot": {"fn": zero_shot_logits, "params": {}},
         "tip_adapter": {"fn": tip_adapter_logits, "params": {"alpha": TIP_ADAPTER_ALPHA, "beta": TIP_ADAPTER_BETA}},
@@ -193,7 +193,7 @@ def main():
     print()
     for method, r in results.items():
         name = DISPLAY_NAMES.get(method, method)
-        print(f"{name:12s}: top-1 {r['accuracy']:.2f}%  ECE {r['ece']:.2f}%  (n={len(eval_labels)})")
+        print(f"{name:12s}: top-1 {r['accuracy']:.2f}%  ECE {r['ece']:.2f}% Signed-Gap {r['signed_gap']:.2f}% (n={len(eval_labels)})")
 
 
 if __name__ == "__main__":
