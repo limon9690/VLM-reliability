@@ -54,6 +54,8 @@ K_SHOT = 16
 TIP_ADAPTER_ALPHA = 1.5
 TIP_ADAPTER_BETA = 5.0
 DISPLAY_NAMES = {"zero_shot": "zero-shot", "tip_adapter": "Tip-Adapter", "coop": "CoOp", "tpt": "TPT"}
+MODEL_NAME = "ViT-B-16-quickgelu"
+PRETRAINED = "openai"
 
 
 class HFImageDataset(Dataset):
@@ -136,10 +138,10 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-16", pretrained="openai")
+    model, _, preprocess = open_clip.create_model_and_transforms(MODEL_NAME, pretrained=PRETRAINED)
     model.eval()
     model.to(device)
-    tokenizer = open_clip.get_tokenizer("ViT-B-16")
+    tokenizer = open_clip.get_tokenizer(MODEL_NAME)
 
     print("loading axiong/imagenet-r")
     ds = load_dataset("axiong/imagenet-r", cache_dir=str(args.data_root))
@@ -165,21 +167,22 @@ def main():
     cache_keys = few_shot_image_features
     cache_values = one_hot.float()
 
+    text_encoder = TextEncoderWrapper(model)  # shared by CoOp and TPT
+
     coop_ctx_path = FEATURES_DIR / "coop_ctx_200_cls.pt"
-    if not coop_ctx_path.exists():
-        raise FileNotFoundError(
-            f"{coop_ctx_path} not found. CoOp is evaluated from a pre-trained context "
-            "vector here; train one with notebooks/05_coop.ipynb first."
-        )
-    text_encoder = TextEncoderWrapper(model)
-    coop_prompt_learner = PromptLearner(
-        clip_model=model, device=device, n_ctx=4, tokenizer=tokenizer, ctx_dim=512, class_names=r_class_names
-    ).to(device)
-    coop_prompt_learner.ctx.data.copy_(torch.load(coop_ctx_path, map_location=device))
-    with torch.no_grad():
-        prompts, tok = coop_prompt_learner()
-        coop_text_features = text_encoder(prompts, tok)
-        coop_text_features = coop_text_features / coop_text_features.norm(dim=-1, keepdim=True)
+    coop_text_features = None
+    if coop_ctx_path.exists():
+        coop_prompt_learner = PromptLearner(
+            clip_model=model, device=device, n_ctx=4, tokenizer=tokenizer,
+            ctx_dim=512, class_names=r_class_names,
+        ).to(device)
+        coop_prompt_learner.ctx.data.copy_(torch.load(coop_ctx_path, map_location=device))
+        with torch.no_grad():
+            prompts, tok = coop_prompt_learner()
+            coop_text_features = text_encoder(prompts, tok)
+            coop_text_features = coop_text_features / coop_text_features.norm(dim=-1, keepdim=True)
+    else:
+        print("CoOp row skipped: no context vector (trained by train_coop_imagenet_r.py)")
 
     augment_transform = transforms.Compose(
         [
@@ -208,14 +211,17 @@ def main():
         "cache_keys": cache_keys.to(device),
         "cache_values": cache_values.to(device),
         "logit_scale": model.logit_scale.exp(),
-        "coop_text_features": coop_text_features.to(device),
     }
     metrics = {"accuracy": accuracy, "ece": ece, "signed_gap": signed_gap}
     methods = {
         "zero_shot": {"fn": zero_shot_logits, "params": {}},
         "tip_adapter": {"fn": tip_adapter_logits, "params": {"alpha": TIP_ADAPTER_ALPHA, "beta": TIP_ADAPTER_BETA}},
-        "coop": {"fn": coop_logits, "params": {}},
     }
+
+    if coop_text_features is not None:
+        shared["coop_text_features"] = coop_text_features.to(device)
+        methods["coop"] = {"fn": coop_logits, "params": {}}
+
     results = run_comparison(shared, methods, metrics)
 
     print("running TPT (per-image gradient steps, this is slow)")
