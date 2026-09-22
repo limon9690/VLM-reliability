@@ -2,6 +2,8 @@ import collections
 import random
 
 def split_indices(labels, seed, n_cache=16, n_val=10):
+    #if hasattr(labels, "tolist"):
+        #labels = labels.tolist()
     rng = random.Random(seed)
     by_class = collections.defaultdict(list)
     for i, y in enumerate(labels):
