@@ -50,6 +50,8 @@ TIP_ADAPTER_ALPHA = 1.5
 TIP_ADAPTER_BETA = 5.0
 SKETCH_GDRIVE_ID = "1Mj0i5HBthqH1p_yeXzsg22gZduvgoNeA"  # same mirror used to build the existing sk_*.pt cache
 DISPLAY_NAMES = {"zero_shot": "zero-shot", "tip_adapter": "Tip-Adapter"}
+MODEL_NAME = "ViT-B-16-quickgelu"
+PRETRAINED = "openai"
 
 
 def ensure_sketch_dataset(data_root):
@@ -139,10 +141,10 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-16", pretrained="openai")
+    model, _, preprocess = open_clip.create_model_and_transforms(MODEL_NAME, pretrained=PRETRAINED)
     model.eval()
     model.to(device)
-    tokenizer = open_clip.get_tokenizer("ViT-B-16")
+    tokenizer = open_clip.get_tokenizer(MODEL_NAME)
 
     few_shot_cache_path = FEATURES_DIR / "sk_few_shot_image_features.pt"
     eval_cache_path = FEATURES_DIR / "sk_eval_features.pt"
