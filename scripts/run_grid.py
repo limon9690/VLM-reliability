@@ -50,9 +50,9 @@ def main():
     gpu = torch.cuda.get_device_name(0) if device.type == "cuda" else "cpu"
 
     model, _, _ = open_clip.create_model_and_transforms(MODEL_NAME, pretrained="openai")
-    logit_scale = (
-        model.logit_scale.exp().item()
-    )  # only the scale is needed; features are cached
+    model = model.to(device).eval()
+    tokenizer = open_clip.get_tokenizer(MODEL_NAME)
+    logit_scale = model.logit_scale.exp().item()
 
     rows = []
     for name in DATASETS:
