@@ -10,3 +10,4 @@ features/
 notes/
 pitches/
 features_gelu/
+scripts/setup_autodl.sh
