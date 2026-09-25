@@ -1,28 +1,37 @@
 """Runs every (dataset, seed) cell and writes results/grid.csv."""
 
-import csv, hashlib, json, sys
+import csv, hashlib, json, sys, time
 from pathlib import Path
-import torch
+
 import open_clip
+import torch
 import torch.nn.functional as F
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from clip_zeroshot import MODEL_NAME
+from coop import coop_text_features, save_coop_ctx, train_coop
 from features_registry import DATASETS, load_features
 from harness import (
     accuracy,
+    coop_logits,
     ece,
     run_comparison,
     signed_gap,
-    zero_shot_logits,
     tip_adapter_logits,
+    zero_shot_logits,
 )
 from splits import split_indices
 
+DATASETS_TO_RUN = list(DATASETS)
 SEEDS = [42, 43, 44]
-ALPHA = 1.5
 RESULTS = REPO_ROOT / "results" / "grid.csv"
+CTX_DIR = REPO_ROOT / "features" / "coop"
+
+ALPHA = 1.5
+COOP_CFG = {"n_ctx": 4, "lr": 0.002, "epochs": 10, "batch_size": 32}
+
 METRICS = {"accuracy": accuracy, "ece": ece, "signed_gap": signed_gap}
 METHODS = {
     "zero_shot": {"method": "zero_shot", "fn": zero_shot_logits, "params": {}},
@@ -36,12 +45,40 @@ METHODS = {
         "fn": tip_adapter_logits,
         "params": {"alpha": ALPHA, "beta": 1.0},
     },
+    "coop": {"method": "coop", "fn": coop_logits, "params": COOP_CFG},
 }
-MODEL_NAME = "ViT-B-16-quickgelu"
 
 
 def config_hash(cfg):
     return hashlib.sha1(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:10]
+
+
+def load_or_train_ctx(name, seed, f, cache_idx, model, tokenizer, device):
+    """Reuses a saved context only if it was trained under the same settings."""
+    path = CTX_DIR / f"coop_ctx_{name}_seed{seed}.pt"
+    expected = {"model": MODEL_NAME, "seed": seed, "n_shot": f["n_shot"], **COOP_CFG}
+    if path.exists():
+        saved = torch.load(path)
+        if saved["class_names"] == list(f["class_names"]) and all(
+            saved.get(k) == v for k, v in expected.items()
+        ):
+            print(f"  loaded CoOp context from {path.name}")
+            return saved["ctx"]
+        print(f"  {path.name} was trained under different settings, retraining")
+
+    ctx = train_coop(
+        model,
+        tokenizer,
+        f["class_names"],
+        f["image_features"][cache_idx],
+        f["labels"][cache_idx],
+        seed=seed,
+        device=device,
+        **COOP_CFG,
+    )
+    CTX_DIR.mkdir(parents=True, exist_ok=True)
+    save_coop_ctx(path, ctx, f["class_names"], **expected)
+    return ctx
 
 
 def main():
@@ -55,13 +92,16 @@ def main():
     logit_scale = model.logit_scale.exp().item()
 
     rows = []
-    for name in DATASETS:
+    for name in DATASETS_TO_RUN:
         f = load_features(name, device=device)
         for seed in SEEDS:
+            t0 = time.time()
             cache_idx, _, test_idx = split_indices(
                 f["labels"].tolist(), seed=seed, n_cache=f["n_shot"], n_val=f["n_val"]
             )
             cache_labels = f["labels"][cache_idx]
+
+            ctx = load_or_train_ctx(name, seed, f, cache_idx, model, tokenizer, device)
 
             shared = {
                 "test_features": f["image_features"][test_idx],
@@ -72,6 +112,14 @@ def main():
                 "cache_values": F.one_hot(cache_labels, num_classes=f["n_classes"])
                 .float()
                 .to(device),
+                "coop_text_features": coop_text_features(
+                    model,
+                    tokenizer,
+                    f["class_names"],
+                    ctx,
+                    device,
+                    n_ctx=COOP_CFG["n_ctx"],
+                ),
             }
 
             results = run_comparison(shared, METHODS, METRICS)
@@ -86,7 +134,6 @@ def main():
                     "n_shot": f["n_shot"],
                     "n_val": f["n_val"],
                 }
-
                 rows.append(
                     {
                         "method": spec["method"],
@@ -108,7 +155,8 @@ def main():
             print(
                 f"{name:13s} seed {seed}  ZS gap {zs:+.2f}  "
                 f"Δβ5 {results['tip_adapter_b5']['signed_gap'] - zs:+.2f}  "
-                f"Δβ1 {results['tip_adapter_b1']['signed_gap'] - zs:+.2f}"
+                f"Δβ1 {results['tip_adapter_b1']['signed_gap'] - zs:+.2f}  "
+                f"ΔCoOp {results['coop']['signed_gap'] - zs:+.2f}  ({time.time() - t0:.0f}s)"
             )
 
     RESULTS.parent.mkdir(exist_ok=True)
