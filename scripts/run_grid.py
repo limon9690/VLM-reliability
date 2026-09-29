@@ -54,14 +54,14 @@ def config_hash(cfg):
 
 
 def git_commit():
-    """Short commit hash, with -dirty if tracked code differs from HEAD (results/ ignored)."""
+    """Short commit hash, with -dirty if src/ or scripts/ differ from HEAD."""
     try:
         sha = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, text=True
         ).strip()
         dirty = (
             subprocess.run(
-                ["git", "diff", "--quiet", "HEAD", "--", ".", ":(exclude)results"],
+                ["git", "diff", "--quiet", "HEAD", "--", "src", "scripts"],
                 cwd=REPO_ROOT,
             ).returncode
             != 0
