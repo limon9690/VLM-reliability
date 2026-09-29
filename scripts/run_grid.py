@@ -1,6 +1,6 @@
-"""Runs every (dataset, seed) cell and writes results/grid.csv."""
+"""Runs every (dataset, seed) cell and merges the rows into results/grid.csv."""
 
-import csv, hashlib, json, sys, time
+import argparse, csv, hashlib, json, subprocess, sys, time
 from pathlib import Path
 
 import open_clip
@@ -24,8 +24,8 @@ from harness import (
 )
 from splits import split_indices
 
-DATASETS_TO_RUN = list(DATASETS)
-SEEDS = [42, 43, 44]
+SEEDS = {"imagenet_r": [42, 43, 44, 45, 46], "sketch_200": [42, 43, 44, 45, 46]}
+DEFAULT_SEEDS = [42, 43, 44]
 RESULTS = REPO_ROOT / "results" / "grid.csv"
 CTX_DIR = REPO_ROOT / "features" / "coop"
 
@@ -51,6 +51,46 @@ METHODS = {
 
 def config_hash(cfg):
     return hashlib.sha1(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:10]
+
+
+def git_commit():
+    """Short commit hash, with -dirty if tracked code differs from HEAD (results/ ignored)."""
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, text=True
+        ).strip()
+        dirty = (
+            subprocess.run(
+                ["git", "diff", "--quiet", "HEAD", "--", ".", ":(exclude)results"],
+                cwd=REPO_ROOT,
+            ).returncode
+            != 0
+        )
+        return sha + ("-dirty" if dirty else "")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+
+def write_rows(new_rows):
+    """Replaces rows for the same (dataset, seed, method); keeps the rest."""
+    keys = {(r["dataset"], int(r["seed"]), r["method"]) for r in new_rows}
+    old = []
+    if RESULTS.exists():
+        with open(RESULTS, newline="") as fh:
+            old = [
+                r
+                for r in csv.DictReader(fh)
+                if (r["dataset"], int(r["seed"]), r["method"]) not in keys
+            ]
+    fields = list(new_rows[0])
+    for r in old:
+        fields += [k for k in r if k not in fields]
+    RESULTS.parent.mkdir(exist_ok=True)
+    with open(RESULTS, "w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields, restval="")
+        writer.writeheader()
+        writer.writerows(old + new_rows)
+    print(f"wrote {len(new_rows)} rows ({len(old)} kept) to {RESULTS}")
 
 
 def load_or_train_ctx(name, seed, f, cache_idx, model, tokenizer, device):
@@ -81,21 +121,41 @@ def load_or_train_ctx(name, seed, f, cache_idx, model, tokenizer, device):
     return ctx
 
 
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument(
+        "--datasets", nargs="+", default=list(DATASETS), choices=list(DATASETS)
+    )
+    p.add_argument(
+        "--seeds",
+        nargs="+",
+        type=int,
+        help="override the per-dataset seeds (spot checks)",
+    )
+    return p.parse_args()
+
+
 def main():
+    args = parse_args()
     torch.manual_seed(42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     gpu = torch.cuda.get_device_name(0) if device.type == "cuda" else "cpu"
+    commit = git_commit()
+    print(f"commit {commit}  device {gpu}")
 
     model, _, _ = open_clip.create_model_and_transforms(MODEL_NAME, pretrained="openai")
     model = model.to(device).eval()
     tokenizer = open_clip.get_tokenizer(MODEL_NAME)
     logit_scale = model.logit_scale.exp().item()
 
-    rows = []
-    for name in DATASETS_TO_RUN:
+    for name in args.datasets:
         f = load_features(name, device=device)
-        for seed in SEEDS:
+        rows = []
+        for seed in args.seeds or SEEDS.get(name, DEFAULT_SEEDS):
             t0 = time.time()
+            if device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats()
+
             cache_idx, _, test_idx = split_indices(
                 f["labels"].tolist(), seed=seed, n_cache=f["n_shot"], n_val=f["n_val"]
             )
@@ -148,23 +208,25 @@ def main():
                         "model_name": MODEL_NAME,
                         "gpu": gpu,
                         "config_hash": config_hash(cfg),
+                        "git_commit": commit,
                     }
                 )
 
             zs = results["zero_shot"]["signed_gap"]
+            mem = (
+                f"  peak {torch.cuda.max_memory_allocated() / 2**30:.1f} GB"
+                if device.type == "cuda"
+                else ""
+            )
             print(
                 f"{name:13s} seed {seed}  ZS gap {zs:+.2f}  "
                 f"Δβ5 {results['tip_adapter_b5']['signed_gap'] - zs:+.2f}  "
                 f"Δβ1 {results['tip_adapter_b1']['signed_gap'] - zs:+.2f}  "
-                f"ΔCoOp {results['coop']['signed_gap'] - zs:+.2f}  ({time.time() - t0:.0f}s)"
+                f"ΔCoOp {results['coop']['signed_gap'] - zs:+.2f}  "
+                f"({time.time() - t0:.0f}s){mem}"
             )
 
-    RESULTS.parent.mkdir(exist_ok=True)
-    with open(RESULTS, "w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-    print(f"wrote {len(rows)} rows to {RESULTS}")
+        write_rows(rows)
 
 
 if __name__ == "__main__":
