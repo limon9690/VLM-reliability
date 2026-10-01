@@ -1,5 +1,5 @@
 import torch
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 
 MODEL_NAME = "ViT-B-16-quickgelu"
 

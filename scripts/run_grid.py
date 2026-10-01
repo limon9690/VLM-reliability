@@ -37,14 +37,13 @@ from harness import (
     tip_adapter_logits,
     zero_shot_logits,
 )
-from image_sources import open_image
+from image_sources import load_manifest, open_image
 from splits import split_indices
 
 SEEDS = {"imagenet_r": [42, 43, 44, 45, 46], "sketch_200": [42, 43, 44, 45, 46]}
 DEFAULT_SEEDS = [42, 43, 44]
 RESULTS = REPO_ROOT / "results" / "grid.csv"
 CTX_DIR = REPO_ROOT / "features" / "coop"
-MANIFEST_DIR = REPO_ROOT / "manifests"
 
 TPT_SEEDS = [42]
 TPT_N = 500
@@ -152,14 +151,6 @@ def make_row(method, name, f, seed, n_test, metrics, params, gpu, commit, run=""
         "config_hash": config_hash(cfg),
         "git_commit": commit,
     }
-
-
-def load_manifest(name):
-    """Refs and labels indexed by cache index."""
-    with open(MANIFEST_DIR / f"{name}.csv", newline="") as fh:
-        rows = list(csv.DictReader(fh))
-    assert [int(r["cache_index"]) for r in rows] == list(range(len(rows)))
-    return [r["ref"] for r in rows], [int(r["label"]) for r in rows]
 
 
 class ManifestImages:

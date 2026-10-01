@@ -16,39 +16,15 @@ from pathlib import Path
 import open_clip
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from clip_zeroshot import MODEL_NAME
 from features_registry import DATASETS, load_features
-from image_sources import image_refs, open_image
+from image_sources import encode_images, image_refs
 
 MANIFEST_DIR = REPO_ROOT / "manifests"
-
-
-class RefDataset(Dataset):
-    def __init__(self, refs, data_root, preprocess):
-        self.refs = refs
-        self.data_root = data_root
-        self.preprocess = preprocess
-
-    def __len__(self):
-        return len(self.refs)
-
-    def __getitem__(self, i):
-        return self.preprocess(open_image(self.refs[i][0], self.data_root))
-
-
-@torch.no_grad()
-def encode(model, loader, device):
-    out = []
-    for i, x in enumerate(loader):
-        out.append(F.normalize(model.encode_image(x.to(device)).float(), dim=-1).cpu())
-        if i % 50 == 0:
-            print(f"  encoded {i * loader.batch_size}/{len(loader.dataset)}")
-    return torch.cat(out)
 
 
 @torch.no_grad()
@@ -97,12 +73,10 @@ def main():
         MODEL_NAME, pretrained="openai"
     )
     model = model.to(device).eval()
-    loader = DataLoader(
-        RefDataset(refs, args.data_root, preprocess),
-        batch_size=args.batch_size,
-        num_workers=args.workers,
+    new = encode_images(
+        model, preprocess, [r[0] for r in refs], args.data_root, device,
+        args.batch_size, args.workers,
     )
-    new = encode(model, loader, device)
 
     new_labels = torch.tensor([r[1] for r in refs])
     cos, idx = match(cached, cached_labels, new, new_labels, device)

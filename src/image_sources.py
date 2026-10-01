@@ -8,10 +8,14 @@ Manifests map cached feature indices to these refs; TPT opens images through the
 Named image_sources, not datasets, so it doesn't shadow HuggingFace `datasets`.
 """
 
+import csv
 from functools import lru_cache
 from pathlib import Path
 
+import torch
+import torch.nn.functional as F
 from PIL import Image
+from torch.utils.data import DataLoader, Dataset
 
 from imagenet_r_classes import wnid_to_r_index
 
@@ -26,6 +30,7 @@ SKETCH_DIR = "sketch"
 V2_DIR = "imagenetv2-matched-frequency-format-val"
 PACS_ROOT = "pacs_data/pacs_data"
 R_REPO, R_SPLIT = "axiong/imagenet-r", "test"
+MANIFEST_DIR = Path(__file__).resolve().parent.parent / "manifests"
 
 
 @lru_cache(maxsize=None)
@@ -93,3 +98,38 @@ def open_image(ref, data_root):
     else:
         image = Image.open(data_root / ref)
     return image.convert("RGB")
+
+
+def load_manifest(name):
+    """Refs and labels indexed by cache index, from manifests/<name>.csv."""
+    with open(MANIFEST_DIR / f"{name}.csv", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert [int(r["cache_index"]) for r in rows] == list(range(len(rows)))
+    return [r["ref"] for r in rows], [int(r["label"]) for r in rows]
+
+
+class RefDataset(Dataset):
+    def __init__(self, refs, data_root, preprocess):
+        self.refs = refs
+        self.data_root = data_root
+        self.preprocess = preprocess
+
+    def __len__(self):
+        return len(self.refs)
+
+    def __getitem__(self, i):
+        return self.preprocess(open_image(self.refs[i], self.data_root))
+
+
+@torch.no_grad()
+def encode_images(model, preprocess, refs, data_root, device, batch_size=256, workers=8):
+    """Normalized image features for refs, in the given order, on CPU."""
+    loader = DataLoader(
+        RefDataset(refs, data_root, preprocess), batch_size=batch_size, num_workers=workers
+    )
+    out = []
+    for i, x in enumerate(loader):
+        out.append(F.normalize(model.encode_image(x.to(device)).float(), dim=-1).cpu())
+        if i % 50 == 0:
+            print(f"  encoded {i * batch_size}/{len(refs)}")
+    return torch.cat(out)
