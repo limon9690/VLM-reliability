@@ -27,7 +27,7 @@ ECE (10 equal-width bins) and top-1 accuracy are reported alongside, from the sa
 ## Setup
 
 Backbone: CLIP ViT-B/16 with OpenAI weights, frozen throughout, loaded through open_clip as
-`ViT-B-16-quickgelu`.
+`ViT-B-16-quickgelu`. The plain ViT-B-16 config uses standard GELU, which does not match the OpenAI weights; earlier runs in this repo had that mismatch, and every number here comes from the corrected model.
 
 | Method      | What it adapts                                                                                                              | Labels used             |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
@@ -111,7 +111,7 @@ has its own starting point (single prompt, 500 images):
 
 ## Reproducing the results
 
-You need a GPU. CoOp and TPT peak at about 28 GB (I used a 32 GB RTX 4080 SUPER)
+You need a GPU. You need a GPU. CoOp and TPT on the 1000-class sets peak at about 28 GB (I used a 32 GB RTX 4080 SUPER); everything else fits in about 6 GB.
 
 **Install.** Python 3.12. Install PyTorch and torchvision for your CUDA version first, then:
 
@@ -176,6 +176,7 @@ scripts/
   download_data.py, encode_features.py, run_grid.py, build_manifest.py
 manifests/              cached feature index -> image, one CSV per dataset
 results/grid.csv        every reported number
+results/gelu/           earlier runs from before the QuickGELU fix, kept as a record
 notebooks/              exploratory work, one per step; numbers before notebook 13 predate the QuickGELU fix
 ```
 
