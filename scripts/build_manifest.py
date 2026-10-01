@@ -52,12 +52,15 @@ def encode(model, loader, device):
 
 
 @torch.no_grad()
-def match(cached, new, device, chunk=4096):
-    """For each cached row: best cosine and index of the nearest new feature."""
-    new_d = new.to(device)
+def match(cached, cached_labels, new, new_labels, device, chunk=4096):
+    """For each cached row: best cosine and index of the nearest same-label new feature.
+    Same-label only, because some images appear in more than one class folder."""
+    new_d, nl = new.to(device), new_labels.to(device)
     best, idx = [], []
     for s in range(0, len(cached), chunk):
-        v, i = (cached[s : s + chunk].to(device) @ new_d.T).max(dim=-1)
+        sims = cached[s : s + chunk].to(device) @ new_d.T
+        other = cached_labels[s : s + chunk, None].to(device) != nl[None, :]
+        v, i = sims.masked_fill(other, -2.0).max(dim=-1)
         best.append(v.cpu())
         idx.append(i.cpu())
     return torch.cat(best), torch.cat(idx)
@@ -84,9 +87,13 @@ def main():
     refs = image_refs(args.dataset, args.data_root)
     print(f"{args.dataset}: {len(cached)} cached features, {len(refs)} images on disk")
     if len(refs) != len(cached):
-        sys.exit("count mismatch: wrong folder, or the source differs from the one encoded")
+        sys.exit(
+            "count mismatch: wrong folder, or the source differs from the one encoded"
+        )
 
-    model, _, preprocess = open_clip.create_model_and_transforms(MODEL_NAME, pretrained="openai")
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        MODEL_NAME, pretrained="openai"
+    )
     model = model.to(device).eval()
     loader = DataLoader(
         RefDataset(refs, args.data_root, preprocess),
@@ -95,7 +102,8 @@ def main():
     )
     new = encode(model, loader, device)
 
-    cos, idx = match(cached, new, device)
+    new_labels = torch.tensor([r[1] for r in refs])
+    cos, idx = match(cached, cached_labels, new, new_labels, device)
     matched_labels = torch.tensor([refs[i][1] for i in idx.tolist()])
     bad_label = (matched_labels != cached_labels).nonzero().flatten()
     low = (cos < args.min_cos).nonzero().flatten()
@@ -116,7 +124,10 @@ def main():
         f"(unexplained {unexplained_dup})  ({time.time() - t0:.0f}s)"
     )
     if len(low) or len(bad_label) or unexplained_dup:
-        print("first problem rows:", sorted(set(low[:5].tolist() + bad_label[:5].tolist())))
+        print(
+            "first problem rows:",
+            sorted(set(low[:5].tolist() + bad_label[:5].tolist())),
+        )
         sys.exit("manifest NOT written")
 
     MANIFEST_DIR.mkdir(exist_ok=True)
