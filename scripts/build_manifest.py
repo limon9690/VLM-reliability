@@ -73,6 +73,8 @@ def parse_args():
     p.add_argument("--min-cos", type=float, default=0.999)
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--workers", type=int, default=8)
+    p.add_argument("--floor", type=float, default=0.99)
+    p.add_argument("--margin", type=float, default=0.05)
     return p.parse_args()
 
 
@@ -107,6 +109,21 @@ def main():
     matched_labels = torch.tensor([refs[i][1] for i in idx.tolist()])
     bad_label = (matched_labels != cached_labels).nonzero().flatten()
     low = (cos < args.min_cos).nonzero().flatten()
+
+    # A low-cosine match is still the right image if it is unambiguous:
+    # above --floor and at least --margin ahead of the best non-identical alternative.
+    kept = []
+    for r in low.tolist():
+        twins = (new @ new[idx[r]]) >= args.min_cos
+        other = (new_labels != cached_labels[r]) | twins
+        alt = (new @ cached[r]).masked_fill(other, -2.0).max().item()
+        if cos[r] >= args.floor and cos[r] - alt >= args.margin:
+            print(
+                f"  row {r}: cosine {cos[r]:.4f}, next {alt:.4f}, accepted as unambiguous"
+            )
+        else:
+            kept.append(r)
+    low = torch.tensor(kept, dtype=torch.long)
 
     # An image claimed by several cached rows is fine only if those rows are identical images.
     counts = torch.bincount(idx, minlength=len(new))
