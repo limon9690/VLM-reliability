@@ -111,7 +111,7 @@ has its own starting point (single prompt, 500 images):
 
 ## Reproducing the results
 
-You need a GPU. You need a GPU. CoOp and TPT on the 1000-class sets peak at about 28 GB (I used a 32 GB RTX 4080 SUPER); everything else fits in about 6 GB.
+You need a GPU. CoOp and TPT on the 1000-class sets peak at about 28 GB (I used a 32 GB RTX 4080 SUPER); everything else fits in about 6 GB.
 
 **Install.** Python 3.12. Install PyTorch and torchvision for your CUDA version first, then:
 
@@ -198,3 +198,4 @@ notebooks/              exploratory work, one per step; numbers before notebook 
   images cannot all be classified correctly by any method.
 - The current `grid.csv` comes from two commits (the main grid and the TPT rows). The numbers in the
   paper will come from a single clean run.
+- Code is MIT-licensed; the datasets keep their own licenses and terms of use.
