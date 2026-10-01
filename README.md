@@ -1,207 +1,199 @@
 # vlm-reliability
 
-Reproductions of CLIP adaptation methods under distribution shift, with
-calibration measured alongside accuracy.
+How adapting CLIP to a new domain changes its calibration, not just its accuracy.
 
-Four methods run through one harness: zero-shot CLIP, CoOp, Tip-Adapter, and
-TPT. Each is evaluated on shifted versions of ImageNet and on PACS, reporting
-top-1 accuracy and Expected Calibration Error from the same code path.
+The repo runs four adaptation methods (zero-shot CLIP, Tip-Adapter, CoOp and TPT) on eight
+distribution-shift test sets through one evaluation harness, and reports top-1 accuracy, ECE and
+the signed calibration gap for every run. All results live in one file, `results/grid.csv`, and
+every row records the settings and the commit that produced it.
 
-Backbone is CLIP ViT-B/16 (OpenAI weights), frozen throughout.
+I work on the reliability and robustness of vision-language models under distribution shift:
+adapting models like CLIP to new domains with little or no labeled data. This repo is the working
+code behind a paper in progress, so the findings below are current readings rather than final
+claims.
 
----
+## What is measured
 
-## About this work
+**Signed gap** is mean confidence minus accuracy, in percentage points. Positive means the model is
+overconfident, negative means underconfident. It is the primary metric here because ECE has no
+sign: an underconfident model and an overconfident one can have the same ECE, and an adaptation
+method can raise ECE either by overshooting or by moving the wrong way.
 
-I work on the reliability of vision-language models under distribution shift —
-adapting frozen models like CLIP to new domains with little or no labeled data.
-This repo is the working artifact: it reproduces four adaptation methods and
-measures calibration alongside accuracy, which most work in this area does not
-report. The main finding so far is that adaptation shifts a model's confidence
-in a consistent direction, so whether it improves or damages calibration
-depends on where the model started, not on the method alone.
+**Δ** is the signed gap after adapting minus the signed gap before. Δ > 0 means confidence rose
+faster than accuracy (or fell more slowly).
+
+ECE (10 equal-width bins) and top-1 accuracy are reported alongside, from the same logits.
+
+## Setup
+
+Backbone: CLIP ViT-B/16 with OpenAI weights, frozen throughout, loaded through open_clip as
+`ViT-B-16-quickgelu`.
+
+| Method      | What it adapts                                                                                                              | Labels used             |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| Zero-shot   | nothing; 80-template prompt ensemble                                                                                        | none                    |
+| Tip-Adapter | training-free cache of few-shot image features; α = 1.5, β = 5 (headline) and β = 1                                         | few-shot, target domain |
+| CoOp        | 4 learned context tokens, initialised from "a photo of a"; Adam, lr 0.002, 10 epochs                                        | few-shot, target domain |
+| TPT         | the same 4 tokens, reset for every image; one AdamW step per test image on 63 augmented views, top 10% lowest-entropy views | none                    |
+
+The few-shot methods use labeled images from the target domain itself (16 per class, 4 for
+ImageNet-V2), following those methods' benchmark convention. TPT starts from the single prompt
+"a photo of a {class}.", so its Δ is measured against a zero-shot baseline with that same prompt
+on the same images, not against the 80-template ensemble.
+
+| Test set                                        | Classes | Shots | Test images | Seeds |
+| ----------------------------------------------- | ------- | ----- | ----------- | ----- |
+| ImageNet-R                                      | 200     | 16    | 24,800      | 5     |
+| ImageNet-Sketch, R's 200 classes ("Sketch-200") | 200     | 16    | 4,952       | 5     |
+| ImageNet-Sketch, all classes ("Sketch-1000")    | 1000    | 16    | 24,889      | 3     |
+| ImageNet-V2 (matched frequency)                 | 1000    | 4     | 6,000       | 3     |
+| PACS photo / art painting / cartoon / sketch    | 7       | 16    | 1,488–3,747 | 3     |
+
+Each seed draws its own split per class: the shots, 10 validation images (none for V2, which has
+only 10 images per class), and the rest as test. Sketch-200 and Sketch-1000 are the same images
+scored against different label sets, which makes them a direct test of what class count alone does.
+TPT runs on 500 test images from seed 42, twice, with only the augmentation seed changed.
 
 ## Results
 
-All numbers are my own runs, not copied from papers. Published numbers are shown
-where a direct comparison exists.
+Means over seeds. Full per-seed rows are in `results/grid.csv`.
 
-### Zero-shot CLIP (80-template prompt ensembling)
+**Change in signed gap after adapting (Δ).** The first column is where zero-shot CLIP starts. TPT
+has its own starting point (single prompt, 500 images):
 
-| Dataset              | Top-1  | Top-5  |
-| -------------------- | ------ | ------ |
-| ImageNet-V2          | 53.21% | 79.50% |
-| ImageNet-R (200 cls) | 72.80% | 90.51% |
-| ImageNet-Sketch      | 44.24% | 72.10% |
-| PACS — photo         | 99.94% | 100.0% |
-| PACS — art_painting  | 96.73% | 100.0% |
-| PACS — cartoon       | 98.72% | 100.0% |
-| PACS — sketch        | 87.99% | 99.95% |
+| Test set     | Zero-shot gap | Δ Tip-Adapter (β=5) | Δ CoOp | TPT start | Δ TPT |
+| ------------ | ------------- | ------------------- | ------ | --------- | ----- |
+| ImageNet-R   | −3.81         | +4.37               | +4.05  | −4.25     | +1.17 |
+| PACS art     | −2.36         | +1.36               | +2.65  | −2.42     | −2.47 |
+| Sketch-200   | −2.27         | +4.93               | +1.77  | −2.20     | −0.37 |
+| PACS cartoon | −2.11         | +1.35               | +1.93  | −2.49     | −0.85 |
+| PACS photo   | −1.22         | +1.21               | +1.15  | −1.13     | +0.11 |
+| ImageNet-V2  | +1.97         | +2.33               | −0.06  | −1.35     | −0.71 |
+| PACS sketch  | +3.17         | +2.72               | −1.45  | +4.98     | −1.95 |
+| Sketch-1000  | +4.58         | +7.55               | −4.42  | +4.11     | +3.41 |
 
-ImageNet-V2 sits below the published ~62%. Labels were verified correct, so the
-gap is prompt/methodology, not a pipeline bug.
+**After adapting: accuracy and ECE.**
 
-### Adaptation methods on ImageNet-R
+| Test set     | Accuracy ZS / TA / CoOp | ECE ZS / TA / CoOp  |
+| ------------ | ----------------------- | ------------------- |
+| ImageNet-R   | 77.79 / 78.69 / 78.97   | 3.82 / 0.84 / 0.93  |
+| PACS art     | 97.53 / 97.62 / 97.82   | 2.62 / 1.11 / 0.59  |
+| Sketch-200   | 81.72 / 84.28 / 86.05   | 2.55 / 2.67 / 1.14  |
+| PACS cartoon | 99.24 / 99.23 / 99.31   | 2.11 / 0.86 / 0.53  |
+| PACS photo   | 99.93 / 99.82 / 99.93   | 1.22 / 0.12 / 0.12  |
+| ImageNet-V2  | 62.06 / 63.08 / 63.65   | 2.94 / 4.61 / 2.64  |
+| PACS sketch  | 90.01 / 90.10 / 92.92   | 3.19 / 5.89 / 1.87  |
+| Sketch-1000  | 48.29 / 55.82 / 53.40   | 4.58 / 12.13 / 0.87 |
 
-| Method      | Top-1  | ECE   |
-| ----------- | ------ | ----- |
-| zero-shot   | 73.54% | 6.45% |
-| Tip-Adapter | 74.86% | 1.09% |
-| CoOp        | 75.07% | 0.76% |
-| TPT         | 65.00% | 8.65% |
+### What the grid shows so far
 
-TPT ran on a 200-image subset against a single-template baseline, so its numbers
-are not directly comparable to the full-set ensembled rows. Tip-Adapter used
-α=1.5, β=5.0.
+1. **The starting point varies in sign, and class count moves it.** Sketch-200 and Sketch-1000
+   contain the same images; scored against 200 classes the model is underconfident (−2.27), against
+   1000 it is overconfident (+4.58).
 
-### ImageNet-Sketch
+2. **Tip-Adapter raises confidence relative to accuracy from every starting point.** Δ > 0 in all
+   56 Tip-Adapter rows (8 test sets, both β values, every seed). From an overconfident start this
+   always makes calibration worse: on Sketch-1000 ECE goes from 4.58 to 12.13 while accuracy improves
+   by 7.5 points. From an underconfident start g it helps only while the boost is smaller than 2|g|;
+   past that it overshoots into overconfidence, as on Sketch-200 (start −2.27, Δ +4.93, ECE 2.55 to
+   2.67). So the starting gap predicts the outcome, but only together with an estimate of Δ.
 
-| Method      | Top-1  | ECE   |
-| ----------- | ------ | ----- |
-| zero-shot   | 44.10% | 0.95% |
-| Tip-Adapter | 52.85% | 8.77% |
+3. **CoOp roughly removes the starting gap, from either side.** Its Δ has the opposite sign to the
+   start in 26 of 28 rows, and its final gap is within ±0.5 on 6 of the 8 test sets. ImageNet-V2
+   (the only 4-shot set) and PACS sketch are the exceptions. The evidence from overconfident starts
+   is thin, and CoOp fits on the same labeled data temperature scaling would use; both are under
+   Known limits.
 
-CoOp and TPT are not run on Sketch — 1000-class prompt training exceeds
-free-tier GPU memory.
+4. **TPT has no consistent direction.** Its Δ is positive on 3 test sets and negative on 5, it
+   lowers mean confidence on 6 of 8, and its Δ mostly follows its accuracy change: where accuracy
+   drops sharply (ImageNet-R, Sketch-1000) the gap rises. At n = 500, ECE also disagreed between the
+   two augmentation runs on the same images (Sketch-200: 3.34 vs 6.08) while the signed gap did not.
 
-### CoOp on Caltech101 (16-shot)
+## Reproducing the results
 
-| Setup                      | Top-1  |
-| -------------------------- | ------ |
-| zero-shot (1 template)     | 84.58% |
-| CoOp, all 101 classes      | 91.42% |
-| CoOp, base classes         | 95.52% |
-| CoOp, new (unseen) classes | 93.14% |
+You need a GPU. CoOp and TPT peak at about 28 GB (I used a 32 GB RTX 4080 SUPER)
 
-The ~2.4 point base-to-new gap reproduces CoOp's known generalization weakness.
+**Install.** Python 3.12. Install PyTorch and torchvision for your CUDA version first, then:
 
-### Calibration direction
+```bash
+pip install open_clip_torch datasets requests tqdm pillow
+```
 
-ECE is unsigned, so it does not show whether a model is over- or
-underconfident. Signed gap (mean confidence − accuracy) does:
+(`requirements.txt` is a lockfile of my development environment and pins a specific CUDA build of
+torch, so on a new machine install as above instead.)
 
-| Dataset         | zero-shot | Tip-Adapter |
-| --------------- | --------- | ----------- |
-| ImageNet-R      | −6.45     | −0.40       |
-| ImageNet-Sketch | −0.13     | +8.76       |
+**Run.** Four commands, from the repo root:
 
-Zero-shot CLIP is underconfident on ImageNet-R and close to calibrated on
-Sketch. Tip-Adapter raises confidence faster than accuracy on both. On R that
-corrects the underconfidence; on Sketch the same shift overshoots into
-overconfidence.
+```bash
+python scripts/download_data.py      # raw images into ../data
+python scripts/encode_features.py    # CLIP features, in manifest order, into features/
+python scripts/run_grid.py           # zero-shot, Tip-Adapter, CoOp  -> results/grid.csv
+python scripts/run_grid.py --tpt     # TPT and its single-template baseline
+```
 
----
+The data goes to a `data/` folder next to the repo; pass `--data-root` to put it elsewhere.
 
-## What's here
+Both setup scripts check their own output. `download_data.py` confirms that every image the
+manifests name is on disk. `encode_features.py` writes the feature caches on a fresh machine; if
+caches already exist it re-encodes and compares instead (labels must match exactly, cosine must be
+at least 0.99), so it also works as a check on existing caches.
+
+`run_grid.py` merges its rows into `results/grid.csv` keyed by (dataset, seed, method), so a subset
+can be rerun without touching the rest:
+
+```bash
+python scripts/run_grid.py --datasets sketch_200 --seeds 42
+```
+
+Each row records the model, GPU, a hash of its settings and the git commit it ran from (marked
+`-dirty` if `src/` or `scripts/` had uncommitted changes).
+
+## How it fits together
+
+**Manifests.** `manifests/<dataset>.csv` maps every cached feature to the image it came from. Some
+of the original caches were built through a shuffled data loader or a filesystem-ordered file list,
+so their order could not be reconstructed from code. `scripts/build_manifest.py` recovered it by
+re-encoding every image and matching it to its cached feature (same label, cosine ≥ 0.996, with the
+two lowest matches checked by hand for ambiguity). Encoding in manifest order reproduces the caches,
+and with them every split and every number in `grid.csv`. TPT, which needs the raw image behind each
+test feature, opens images through the manifests.
+
+**Harness.** Every method returns logits of shape `(N, num_classes)`, and every metric is a function
+`(logits, labels) -> number`, so adding a metric never touches a method.
 
 ```
 src/
-  attention.py        self-attention and multi-head attention, written from scratch
-  vit.py              Vision Transformer (patch embedding, encoder, head)
-  nanovlm.py          minimal VLM: ViT encoder → projection → causal LM
-  clip_zeroshot.py    feature caching, text/image feature builders, top-k accuracy
-  imagenet_classes.py CLIP class names + 80 prompt templates
-  coop.py             PromptLearner and TextEncoderWrapper
-  tip_adapter.py      training-free cache model (affinity + residual)
-  tpt.py              test-time prompt tuning entropy loss
-  harness.py          unified evaluation: shared configs, pluggable metrics
-
-notebooks/            one per roadmap week
-features/             cached features (gitignored)
-data/                 datasets (gitignored)
+  harness.py            methods as logits, pluggable metrics, TPT loop
+  coop.py               PromptLearner, text encoder wrapper, CoOp training
+  tip_adapter.py        cache model
+  tpt.py                entropy objective with confidence selection
+  clip_zeroshot.py      model name, text and image feature builders
+  features_registry.py  the 8 datasets: cache files, class names, shots
+  image_sources.py      image order per dataset, manifest loading, image encoding
+  splits.py             seeded per-class cache / validation / test split
+  attention.py, vit.py, nanovlm.py   from-scratch attention, ViT and a tiny VLM (learning work, not used by the grid)
+scripts/
+  download_data.py, encode_features.py, run_grid.py, build_manifest.py
+manifests/              cached feature index -> image, one CSV per dataset
+results/grid.csv        every reported number
+notebooks/              exploratory work, one per step; numbers before notebook 13 predate the QuickGELU fix
 ```
-
-The harness runs every method through one interface. Each method returns logits
-of shape `(N, num_classes)`, and metrics are pluggable functions of
-`(logits, labels) → number`, so adding a metric does not touch the methods.
-
----
-
-## Running it
-
-### 1. Clone and set up a Python environment
-
-```
-git clone https://github.com/limon9690/VLM-reliability.git
-cd VLM-reliability
-
-python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-```
-
-Tested on Python 3.12.
-
-### 2. Install dependencies
-
-```
-pip install -r requirements.txt
-pip install open_clip_torch datasets torchvision gdown scikit-learn
-```
-
-`requirements.txt` covers the notebook/dev tooling (`torch`, `jupyter`, etc).
-The second line installs what `src/` and `scripts/` actually import — CLIP
-backbone, HuggingFace `datasets`, `torchvision`, `gdown`, `scikit-learn` for
-the separability probes in `notebooks/09`. Not folded into the lockfile yet.
-
-### 3. Folder structure
-
-`data/` (raw datasets) and `features/` (cached tensors) are both gitignored
-and empty on a fresh clone; each script creates them and fills in only the
-files it needs. You need a GPU for the first run — feature extraction and
-CoOp training are too slow on CPU to be usable.
-
-### 4. Reproduce a results table
-
-Each script checks `features/` for its cache first and only recomputes what's
-missing, so the first run per dataset is the slow one (feature extraction,
-and for Caltech101, CoOp training) and later runs load straight from cache.
-
-```
-# "Adaptation methods on ImageNet-R" (zero-shot, Tip-Adapter, CoOp, TPT)
-# downloads axiong/imagenet-r from HuggingFace on first run
-python scripts/eval_imagenet_r.py
-
-# "ImageNet-Sketch" (zero-shot, Tip-Adapter)
-# downloads the ImageNet-Sketch mirror via gdown on first run
-python scripts/eval_imagenet_sketch.py
-
-# "CoOp on Caltech101 (16-shot)" (zero-shot, CoOp all-101, CoOp base/new split)
-# downloads Caltech101 via torchvision on first run
-python scripts/eval_caltech_coop.py
-```
-
-All three accept `--data-root <dir>` to change where raw datasets are
-downloaded (default `data/`).
-
-`eval_imagenet_r.py`'s CoOp row is eval-only: it loads a pre-trained context
-vector from `features/coop_ctx_200_cls.pt` rather than training one. That file
-is part of the author's local cache, gitignored like the rest of `features/`,
-and there is currently no script in this repo that reproduces it — a fresh
-clone can run the zero-shot/Tip-Adapter/TPT rows immediately, but needs that
-checkpoint supplied separately to run the CoOp row too.
-
----
 
 ## Known limits
 
-- TPT ran on n=200–500 subsets, not the full set. Per-image gradient steps
-  plus 63 augmented views make the full set impractical on free-tier GPU.
-- TPT is compared against a single-template zero-shot baseline, while the
-  other methods use 80-template ensembling. The +1.5 gain over its own
-  baseline is real; the absolute number isn't comparable across rows.
-- Tip-Adapter's α and β were tuned on ImageNet-R and carried over to
-  ImageNet-Sketch without retuning. The Sketch numbers may reflect a poor α
-  for a 1000-class softmax more than a property of that shift.
-- ImageNet-R has 200 classes, ImageNet-Sketch has 1000. Softmax confidence
-  distributions aren't directly comparable across them, which matters for any
-  cross-dataset calibration claim.
-- CoOp used Adam, not the SGD + cosine schedule from the paper. Internal
-  comparisons are consistent; absolute numbers differ slightly from published.
-
----
-
-## Notes
-
-CLIP is frozen in every method here — the pattern across the field is a frozen
-backbone with something small attached: a learned prompt (CoOp), a feature
-cache (Tip-Adapter), or a per-image prompt update with no labels (TPT).
+- CoOp uses Adam instead of the paper's SGD with cosine schedule, and initialises its context from
+  "a photo of a" instead of randomly. Internal comparisons are consistent; absolute numbers will
+  differ slightly from published ones.
+- ImageNet-V2 has 10 images per class, so it runs 4-shot with no validation split. Its Δ is not
+  comparable in size to the 16-shot sets.
+- Tip-Adapter's α and β are fixed, not tuned per test set. They are reported at two β values
+  because the size of Δ depends on β.
+- TPT runs on 500 images from one seed, with random-crop and flip augmentation rather than the
+  AugMix used in the TPT paper. Its two runs measure augmentation noise, not sampling noise.
+- Only three test sets start overconfident, and they share sketch style or low shot count, so the
+  CoOp result rests on thin evidence for overconfident starts.
+- There is no temperature-scaling baseline yet. It is the obvious competing explanation for CoOp.
+- ImageNet-Sketch contains duplicate images, some filed under more than one class. Those test
+  images cannot all be classified correctly by any method.
+- The current `grid.csv` comes from two commits (the main grid and the TPT rows). The numbers in the
+  paper will come from a single clean run.

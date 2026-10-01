@@ -33,17 +33,20 @@ def image_cache(name, model, preprocess, device, args):
     path = FEATURES_DIR / f"{DATASETS[name]['images']}.pt"
     refs, labels = load_manifest(name)
     labels = torch.tensor(labels)
-    feats = encode_images(model, preprocess, refs, args.data_root, device,
-                          args.batch_size, args.workers)
+    feats = encode_images(
+        model, preprocess, refs, args.data_root, device, args.batch_size, args.workers
+    )
 
     if path.exists() and not args.overwrite:
         old = torch.load(path)
         cos = (F.normalize(old["image_features"].float(), dim=-1) * feats).sum(-1)
         same = torch.equal(old["labels"].long(), labels)
         ok = bool(same and cos.min() >= MIN_COS)
-        print(f"  {path.name} exists, compared: labels {'match' if same else 'DIFFER'}, "
-              f"cosine min {cos.min():.6f} median {cos.median():.6f}  "
-              f"{'OK' if ok else 'MISMATCH'}")
+        print(
+            f"  {path.name} exists, compared: labels {'match' if same else 'DIFFER'}, "
+            f"cosine min {cos.min():.6f} median {cos.median():.6f}  "
+            f"{'OK' if ok else 'MISMATCH'}"
+        )
         return ok
 
     torch.save({"image_features": feats, "labels": labels}, path)
@@ -57,19 +60,35 @@ def text_cache(name, model, tokenizer, device, args):
     class_names = CLASS_NAMES[spec["class_names"]]
     if path.exists() and not args.overwrite:
         old = torch.load(path)
-        new = build_and_cache_text_features(model, tokenizer, class_names, IMAGENET_TEMPLATES,
-                                            device, "/tmp", f"check_{spec['text']}")
+        new = build_and_cache_text_features(
+            model,
+            tokenizer,
+            class_names,
+            IMAGENET_TEMPLATES,
+            device,
+            "/tmp",
+            f"check_{spec['text']}",
+        )
         ok = torch.allclose(old.float(), new.float(), atol=1e-4)
         print(f"  {path.name} exists, compared: {'OK' if ok else 'MISMATCH'}")
         return ok
-    build_and_cache_text_features(model, tokenizer, class_names, IMAGENET_TEMPLATES,
-                                  device, str(FEATURES_DIR), spec["text"])
+    build_and_cache_text_features(
+        model,
+        tokenizer,
+        class_names,
+        IMAGENET_TEMPLATES,
+        device,
+        str(FEATURES_DIR),
+        spec["text"],
+    )
     return True
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--datasets", nargs="+", default=list(DATASETS), choices=list(DATASETS))
+    p.add_argument(
+        "--datasets", nargs="+", default=list(DATASETS), choices=list(DATASETS)
+    )
     p.add_argument("--data-root", type=Path, default=REPO_ROOT.parent / "data")
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--batch-size", type=int, default=256)
@@ -77,7 +96,9 @@ def main():
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, _, preprocess = open_clip.create_model_and_transforms(MODEL_NAME, pretrained="openai")
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        MODEL_NAME, pretrained="openai"
+    )
     model = model.to(device).eval()
     tokenizer = open_clip.get_tokenizer(MODEL_NAME)
     FEATURES_DIR.mkdir(exist_ok=True)
