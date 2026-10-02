@@ -66,7 +66,7 @@ def run_tpt(
         prompts, tok = prompt_learner()
         txt = text_encoder(prompts, tok)
         txt = txt / txt.norm(dim=-1, keepdim=True)
-        logits = img_feats @ txt.t()
+        logits = model.logit_scale.exp() * (img_feats @ txt.t())
         loss = tpt_entropy_loss(logits, top_k)
         optimizer.zero_grad()
         loss.backward()
