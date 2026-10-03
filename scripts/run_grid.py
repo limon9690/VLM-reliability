@@ -132,7 +132,9 @@ def write_rows(new_rows):
     print(f"wrote {len(new_rows)} rows ({len(old)} kept) to {RESULTS}")
 
 
-def make_row(method, name, f, seed, n_test, metrics, params, gpu, commit, run=""):
+def make_row(
+    method, name, f, seed, n_test, metrics, params, gpu, commit, run="", g_shots=""
+):
     cfg = {
         "model": MODEL_NAME,
         "dataset": name,
@@ -153,6 +155,7 @@ def make_row(method, name, f, seed, n_test, metrics, params, gpu, commit, run=""
         "beta": params.get("beta", ""),
         "n_test": n_test,
         **{k: round(v, 4) for k, v in metrics.items()},
+        "g_shots": round(g_shots, 4) if g_shots != "" else "",
         "model_name": MODEL_NAME,
         "gpu": gpu,
         "config_hash": config_hash(cfg),
@@ -207,8 +210,14 @@ def run_tpt_cells(
 
     rows = []
     for seed in seeds:
-        _, _, test_idx = split_indices(
+        cache_idx, _, test_idx = split_indices(
             f["labels"].tolist(), seed=seed, n_cache=f["n_shot"], n_val=f["n_val"]
+        )
+
+        # starting gap estimated on the labeled shots, with TPT's own starting prompt
+        g_shots = signed_gap(
+            zero_shot_logits(f["image_features"][cache_idx], single_text, logit_scale),
+            f["labels"][cache_idx].to(device),
         )
         sample = random.Random(seed).sample(test_idx, min(n, len(test_idx)))
         labels = f["labels"][sample]
@@ -229,6 +238,7 @@ def run_tpt_cells(
                 {"template": SINGLE_TEMPLATE},
                 gpu,
                 commit,
+                g_shots=g_shots,
             )
         )
 
@@ -267,6 +277,7 @@ def run_tpt_cells(
                     gpu,
                     commit,
                     run=run,
+                    g_shots=g_shots,
                 )
             )
             mem = (
@@ -275,7 +286,8 @@ def run_tpt_cells(
                 else ""
             )
             print(
-                f"{name:13s} seed {seed} run {run}  base gap {base['signed_gap']:+.2f}  "
+                f"{name:13s} seed {seed} run {run}  g_shots {g_shots:+.2f}  "
+                f"base gap {base['signed_gap']:+.2f}  "
                 f"TPT gap {r['signed_gap']:+.2f}  Δ {r['signed_gap'] - base['signed_gap']:+.2f}  "
                 f"ECE {base['ece']:.2f} → {r['ece']:.2f}  "
                 f"acc {base['accuracy']:.2f} → {r['accuracy']:.2f}  ({time.time() - t0:.0f}s){mem}"
@@ -391,6 +403,14 @@ def main():
             )
             cache_labels = f["labels"][cache_idx]
 
+            # starting gap estimated on the labeled shots (zero-shot never trains on them)
+            g_shots = signed_gap(
+                zero_shot_logits(
+                    f["image_features"][cache_idx], f["text_features"], logit_scale
+                ),
+                cache_labels.to(device),
+            )
+
             ctx = load_or_train_ctx(name, seed, f, cache_idx, model, tokenizer, device)
 
             shared = {
@@ -426,6 +446,7 @@ def main():
                         spec["params"],
                         gpu,
                         commit,
+                        g_shots=g_shots,
                     )
                 )
 
@@ -436,7 +457,7 @@ def main():
                 else ""
             )
             print(
-                f"{name:13s} seed {seed}  ZS gap {zs:+.2f}  "
+                f"{name:13s} seed {seed}  g_shots {g_shots:+.2f}  ZS gap {zs:+.2f}  "
                 f"Δβ5 {results['tip_adapter_b5']['signed_gap'] - zs:+.2f}  "
                 f"Δβ1 {results['tip_adapter_b1']['signed_gap'] - zs:+.2f}  "
                 f"ΔCoOp {results['coop']['signed_gap'] - zs:+.2f}  "
