@@ -30,6 +30,28 @@ def tip_adapter_logits(
     return zs_logits + alpha * cache_logits
 
 
+def tip_adapter_f_logits(
+    test_features,
+    text_features,
+    logit_scale,
+    f_cache_keys,
+    cache_values,
+    alpha,
+    beta,
+    **cfg
+):
+    """Tip-Adapter with trained keys (see tip_adapter_f.py)."""
+    return tip_adapter_logits(
+        test_features,
+        text_features,
+        logit_scale,
+        f_cache_keys,
+        cache_values,
+        alpha,
+        beta,
+    )
+
+
 def coop_logits(test_features, coop_text_features, logit_scale, **cfg):
     return logit_scale * (test_features @ coop_text_features.t())
 

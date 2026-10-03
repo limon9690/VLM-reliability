@@ -36,12 +36,14 @@ from harness import (
     logit_range,
     run_comparison,
     run_tpt,
+    tip_adapter_f_logits,
     signed_gap,
     tip_adapter_logits,
     zero_shot_logits,
 )
 from image_sources import load_manifest, open_image
 from splits import split_indices
+from tip_adapter_f import train_tip_adapter_f
 
 SEEDS = {"imagenet_r": [42, 43, 44, 45, 46], "sketch_200": [42, 43, 44, 45, 46]}
 DEFAULT_SEEDS = [42, 43, 44]
@@ -64,6 +66,16 @@ TPT_AUGMENT = transforms.Compose(
 
 ALPHA = 1.5
 COOP_CFG = {"n_ctx": 4, "lr": 0.002, "epochs": 10, "batch_size": 32}
+# official Tip-Adapter-F training settings; fixed alpha/beta; leave-one-out (see tip_adapter_f.py)
+TIP_F_CFG = {
+    "alpha": ALPHA,
+    "beta": 5.0,
+    "epochs": 20,
+    "lr": 1e-3,
+    "eps": 1e-4,
+    "batch_size": 256,
+    "leave_one_out": True,
+}
 
 METRICS = {
     "accuracy": accuracy,
@@ -84,6 +96,11 @@ METHODS = {
         "params": {"alpha": ALPHA, "beta": 1.0},
     },
     "coop": {"method": "coop", "fn": coop_logits, "params": COOP_CFG},
+    "tip_adapter_f": {
+        "method": "tip_adapter_f",
+        "fn": tip_adapter_f_logits,
+        "params": TIP_F_CFG,
+    },
 }
 
 
@@ -432,15 +449,27 @@ def main():
 
             ctx = load_or_train_ctx(name, seed, f, cache_idx, model, tokenizer, device)
 
+            cache_values = (
+                F.one_hot(cache_labels, num_classes=f["n_classes"]).float().to(device)
+            )
+            f_keys, f_stats = train_tip_adapter_f(
+                f["image_features"][cache_idx],
+                cache_values,
+                f["text_features"],
+                logit_scale,
+                seed=seed,
+                device=device,
+                **TIP_F_CFG,
+            )
+
             shared = {
                 "test_features": f["image_features"][test_idx],
                 "labels": f["labels"][test_idx].to(device),
                 "text_features": f["text_features"],
                 "logit_scale": logit_scale,
                 "cache_keys": f["image_features"][cache_idx],
-                "cache_values": F.one_hot(cache_labels, num_classes=f["n_classes"])
-                .float()
-                .to(device),
+                "cache_values": cache_values,
+                "f_cache_keys": f_keys,
                 "coop_text_features": coop_text_features(
                     model,
                     tokenizer,
@@ -517,7 +546,13 @@ def main():
                 f"Δβ5 {results['tip_adapter_b5']['signed_gap'] - zs:+.2f}  "
                 f"Δβ1 {results['tip_adapter_b1']['signed_gap'] - zs:+.2f}  "
                 f"ΔCoOp {results['coop']['signed_gap'] - zs:+.2f}  "
+                f"ΔTA-F {results['tip_adapter_f']['signed_gap'] - zs:+.2f}  "
                 f"{ts_msg}  ({time.time() - t0:.0f}s){mem}"
+            )
+
+            print(
+                f"  TA-F loss {f_stats['loss_start']:.4f} → {f_stats['loss_end']:.4f}  "
+                f"key shift {f_stats['key_shift']:.4f}  ({f_stats['seconds']:.0f}s)"
             )
 
         write_rows(rows)
