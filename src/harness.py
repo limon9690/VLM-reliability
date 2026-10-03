@@ -146,3 +146,8 @@ def signed_gap(logits, labels):
     conf, pred = probs.max(dim=-1)
     acc = (pred == labels).float().mean().item()
     return (conf.mean().item() - acc) * 100  # positive = overconfident
+
+
+def logit_range(logits, labels):
+    """Mean per-image (max - min) of the logits the method predicts with."""
+    return (logits.max(dim=-1).values - logits.min(dim=-1).values).mean().item()

@@ -31,6 +31,7 @@ from harness import (
     coop_logits,
     ece,
     evaluate,
+    logit_range,
     run_comparison,
     run_tpt,
     signed_gap,
@@ -64,7 +65,12 @@ TPT_AUGMENT = transforms.Compose(
 ALPHA = 1.5
 COOP_CFG = {"n_ctx": 4, "lr": 0.002, "epochs": 10, "batch_size": 32}
 
-METRICS = {"accuracy": accuracy, "ece": ece, "signed_gap": signed_gap}
+METRICS = {
+    "accuracy": accuracy,
+    "ece": ece,
+    "signed_gap": signed_gap,
+    "logit_range": logit_range,
+}
 METHODS = {
     "zero_shot": {"method": "zero_shot", "fn": zero_shot_logits, "params": {}},
     "tip_adapter_b5": {
