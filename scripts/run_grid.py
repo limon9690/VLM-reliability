@@ -1,7 +1,8 @@
 """Runs every (dataset, seed) cell and merges the rows into results/grid.csv.
 
-Default: zero-shot, Tip-Adapter (β=5, β=1) and CoOp from cached features.
---tpt: single-template zero-shot baseline and TPT on --tpt-n test images per
+Default: zero-shot, temperature scaling, Tip-Adapter (β=5, β=1), CoOp,
+Tip-Adapter-F, and SaLS on Tip-Adapter, CoOp and Tip-Adapter-F, from cached features.
+--tpt: single-template zero-shot baseline, TPT and TPT+SaLS on --tpt-n test images per
 seed (default 2,000, or the whole test split if smaller), one row per
 augmentation run in --tpt-runs, images opened through manifests/<dataset>.csv.
 """
@@ -35,10 +36,12 @@ from harness import (
     fit_temperature,
     logit_range,
     run_comparison,
+    sals,
     run_tpt,
     tip_adapter_f_logits,
     signed_gap,
     tip_adapter_logits,
+    with_sals,
     zero_shot_logits,
 )
 from image_sources import load_manifest, open_image
@@ -101,6 +104,27 @@ METHODS = {
         "fn": tip_adapter_f_logits,
         "params": TIP_F_CFG,
     },
+    # SaLS: each method's logits rescaled to zero-shot's per-image range
+    "tip_adapter_sals": {
+        "method": "tip_adapter_sals",
+        "fn": with_sals(tip_adapter_logits),
+        "params": {"alpha": ALPHA, "beta": 5.0},
+    },
+    "coop_sals": {
+        "method": "coop_sals",
+        "fn": with_sals(coop_logits),
+        "params": COOP_CFG,
+    },
+    "tip_adapter_f_sals": {
+        "method": "tip_adapter_f_sals",
+        "fn": with_sals(tip_adapter_f_logits),
+        "params": TIP_F_CFG,
+    },
+}
+SALS_OF = {  # SaLS row -> the row it rescales
+    "tip_adapter_sals": "tip_adapter_b5",
+    "coop_sals": "coop",
+    "tip_adapter_f_sals": "tip_adapter_f",
 }
 
 
@@ -256,11 +280,11 @@ def run_tpt_cells(
         sample = random.Random(seed).sample(test_idx, min(n, len(test_idx)))
         labels = f["labels"][sample]
 
-        base = evaluate(
-            zero_shot_logits(f["image_features"][sample], single_text, logit_scale),
-            labels.to(device),
-            METRICS,
+        base_logits = zero_shot_logits(
+            f["image_features"][sample], single_text, logit_scale
         )
+        base = evaluate(base_logits, labels.to(device), METRICS)
+
         rows.append(
             make_row(
                 "zero_shot_single",
@@ -297,9 +321,21 @@ def run_tpt_cells(
                 TPT_AUGMENT,
                 METRICS,
                 subset=len(sample),
+                return_logits=True,
                 **TPT_CFG,
             )
+            r, tpt_logits = r
             r.pop("n")
+            # SaLS on TPT: rescaled to the single-template zero-shot range (TPT's own start)
+            r_sals = evaluate(
+                sals(tpt_logits, base_logits.cpu()), labels.cpu(), METRICS
+            )
+
+            # an affine rescale can't change the argmax; float ties may flip one image
+            assert (
+                abs(r_sals["accuracy"] - r["accuracy"]) <= 100 / len(sample) + 1e-6
+            ), "SaLS changed TPT accuracy"
+
             rows.append(
                 make_row(
                     "tpt",
@@ -316,6 +352,24 @@ def run_tpt_cells(
                     n_shot_errors=n_shot_errors,
                 )
             )
+
+            rows.append(
+                make_row(
+                    "tpt_sals",
+                    name,
+                    f,
+                    seed,
+                    len(sample),
+                    r_sals,
+                    {**TPT_CFG, "aug_seed": run},
+                    gpu,
+                    commit,
+                    run=run,
+                    g_shots=g_shots,
+                    n_shot_errors=n_shot_errors,
+                )
+            )
+
             mem = (
                 f"  peak {torch.cuda.max_memory_allocated() / 2**30:.1f} GB"
                 if device.type == "cuda"
@@ -325,7 +379,8 @@ def run_tpt_cells(
                 f"{name:13s} seed {seed} run {run}  g_shots {g_shots:+.2f}  "
                 f"base gap {base['signed_gap']:+.2f}  "
                 f"TPT gap {r['signed_gap']:+.2f}  Δ {r['signed_gap'] - base['signed_gap']:+.2f}  "
-                f"ECE {base['ece']:.2f} → {r['ece']:.2f}  "
+                f"SaLS gap {r_sals['signed_gap']:+.2f}  "
+                f"ECE {base['ece']:.2f} → {r['ece']:.2f} (SaLS {r_sals['ece']:.2f})  "
                 f"acc {base['accuracy']:.2f} → {r['accuracy']:.2f}  ({time.time() - t0:.0f}s){mem}"
             )
     return rows
@@ -481,6 +536,19 @@ def main():
             }
 
             results = run_comparison(shared, METHODS, METRICS)
+            for s_key, base_key in SALS_OF.items():
+                assert (
+                    abs(results[s_key]["accuracy"] - results[base_key]["accuracy"])
+                    <= 100 / len(test_idx) + 1e-6
+                ), f"{s_key} changed accuracy"
+                assert (
+                    abs(
+                        results[s_key]["logit_range"]
+                        - results["zero_shot"]["logit_range"]
+                    )
+                    < 1e-3
+                ), f"{s_key} range differs from zero-shot"
+
             for key, r in results.items():
                 spec = METHODS[key]
                 rows.append(
@@ -507,7 +575,8 @@ def main():
                 ts_logits = zero_shot_logits(**shared) / T
                 ts = evaluate(ts_logits, shared["labels"], METRICS)
                 assert (
-                    ts["accuracy"] == results["zero_shot"]["accuracy"]
+                    abs(ts["accuracy"] - results["zero_shot"]["accuracy"])
+                    <= 100 / len(test_idx) + 1e-6
                 ), "TS changed accuracy"
             else:
                 T, ts = "", {}
@@ -548,6 +617,14 @@ def main():
                 f"ΔCoOp {results['coop']['signed_gap'] - zs:+.2f}  "
                 f"ΔTA-F {results['tip_adapter_f']['signed_gap'] - zs:+.2f}  "
                 f"{ts_msg}  ({time.time() - t0:.0f}s){mem}"
+            )
+
+            print(
+                "  SaLS Δ "
+                + "  ".join(
+                    f"{s_key} {results[s_key]['signed_gap'] - zs:+.2f}"
+                    for s_key in SALS_OF
+                )
             )
 
             print(

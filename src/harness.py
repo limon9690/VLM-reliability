@@ -70,6 +70,7 @@ def run_tpt(
     lr=0.005,
     top_k=0.1,
     subset=200,
+    return_logits=False,
 ):
     all_logits = []
     all_labels = []
@@ -121,6 +122,8 @@ def run_tpt(
     print("TPT mean confidence:", confidences.mean().item())
     print("TPT min/max confidence:", confidences.min().item(), confidences.max().item())
 
+    if return_logits:
+        return result, all_logits
     return result
 
 
@@ -192,6 +195,26 @@ def fit_temperature(logits, labels, max_iter=100):
     with torch.enable_grad():
         optimizer.step(closure)
     return log_t.exp().item()
+
+
+def sals(logits, ref_logits):
+    """SaLS (Murugesan et al., ECCV 2024): rescale each image's logits to the
+    range of its reference logits, l' = (R_ref / R_l) * (l - min l) + min ref.
+    A positive per-image affine map, so the argmax (accuracy) cannot change."""
+    lo = logits.min(dim=-1, keepdim=True).values
+    hi = logits.max(dim=-1, keepdim=True).values
+    ref_lo = ref_logits.min(dim=-1, keepdim=True).values
+    ref_hi = ref_logits.max(dim=-1, keepdim=True).values
+    return (ref_hi - ref_lo) / (hi - lo) * (logits - lo) + ref_lo
+
+
+def with_sals(logits_fn):
+    """Wraps a method's logits function: its logits, rescaled to zero-shot's range."""
+
+    def fn(**kw):
+        return sals(logits_fn(**kw), zero_shot_logits(**kw))
+
+    return fn
 
 
 def logit_range(logits, labels):
