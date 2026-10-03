@@ -32,6 +32,7 @@ from harness import (
     coop_logits,
     ece,
     evaluate,
+    fit_temperature,
     logit_range,
     run_comparison,
     run_tpt,
@@ -133,7 +134,19 @@ def write_rows(new_rows):
 
 
 def make_row(
-    method, name, f, seed, n_test, metrics, params, gpu, commit, run="", g_shots=""
+    method,
+    name,
+    f,
+    seed,
+    n_test,
+    metrics,
+    params,
+    gpu,
+    commit,
+    run="",
+    g_shots="",
+    n_shot_errors="",
+    temperature="",
 ):
     cfg = {
         "model": MODEL_NAME,
@@ -156,6 +169,8 @@ def make_row(
         "n_test": n_test,
         **{k: round(v, 4) for k, v in metrics.items()},
         "g_shots": round(g_shots, 4) if g_shots != "" else "",
+        "n_shot_errors": n_shot_errors,
+        "temperature": round(temperature, 4) if temperature != "" else "",
         "model_name": MODEL_NAME,
         "gpu": gpu,
         "config_hash": config_hash(cfg),
@@ -215,10 +230,12 @@ def run_tpt_cells(
         )
 
         # starting gap estimated on the labeled shots, with TPT's own starting prompt
-        g_shots = signed_gap(
-            zero_shot_logits(f["image_features"][cache_idx], single_text, logit_scale),
-            f["labels"][cache_idx].to(device),
+        shot_logits = zero_shot_logits(
+            f["image_features"][cache_idx], single_text, logit_scale
         )
+        shot_labels = f["labels"][cache_idx].to(device)
+        g_shots = signed_gap(shot_logits, shot_labels)
+        n_shot_errors = (shot_logits.argmax(dim=-1) != shot_labels).sum().item()
         sample = random.Random(seed).sample(test_idx, min(n, len(test_idx)))
         labels = f["labels"][sample]
 
@@ -239,6 +256,7 @@ def run_tpt_cells(
                 gpu,
                 commit,
                 g_shots=g_shots,
+                n_shot_errors=n_shot_errors,
             )
         )
 
@@ -278,6 +296,7 @@ def run_tpt_cells(
                     commit,
                     run=run,
                     g_shots=g_shots,
+                    n_shot_errors=n_shot_errors,
                 )
             )
             mem = (
@@ -404,12 +423,12 @@ def main():
             cache_labels = f["labels"][cache_idx]
 
             # starting gap estimated on the labeled shots (zero-shot never trains on them)
-            g_shots = signed_gap(
-                zero_shot_logits(
-                    f["image_features"][cache_idx], f["text_features"], logit_scale
-                ),
-                cache_labels.to(device),
+            shot_logits = zero_shot_logits(
+                f["image_features"][cache_idx], f["text_features"], logit_scale
             )
+            shot_labels = cache_labels.to(device)
+            g_shots = signed_gap(shot_logits, shot_labels)
+            n_shot_errors = (shot_logits.argmax(dim=-1) != shot_labels).sum().item()
 
             ctx = load_or_train_ctx(name, seed, f, cache_idx, model, tokenizer, device)
 
@@ -447,10 +466,47 @@ def main():
                         gpu,
                         commit,
                         g_shots=g_shots,
+                        n_shot_errors=n_shot_errors,
                     )
                 )
 
+            # temperature scaling, fitted on the same labeled shots CoOp trains on.
+            # No finite fit when every shot is correct: the row is written with
+            # n_shot_errors 0 and blank metrics.
+            if n_shot_errors > 0:
+                T = fit_temperature(shot_logits, shot_labels)
+                ts_logits = zero_shot_logits(**shared) / T
+                ts = evaluate(ts_logits, shared["labels"], METRICS)
+                assert (
+                    ts["accuracy"] == results["zero_shot"]["accuracy"]
+                ), "TS changed accuracy"
+            else:
+                T, ts = "", {}
+            rows.append(
+                make_row(
+                    "zero_shot_ts",
+                    name,
+                    f,
+                    seed,
+                    len(test_idx),
+                    ts,
+                    {},
+                    gpu,
+                    commit,
+                    g_shots=g_shots,
+                    n_shot_errors=n_shot_errors,
+                    temperature=T,
+                )
+            )
+
             zs = results["zero_shot"]["signed_gap"]
+
+            ts_msg = (
+                f"T {T:.3f} ΔTS {ts['signed_gap'] - zs:+.2f}"
+                if ts
+                else "TS: no shot errors"
+            )
+
             mem = (
                 f"  peak {torch.cuda.max_memory_allocated() / 2**30:.1f} GB"
                 if device.type == "cuda"
@@ -461,7 +517,7 @@ def main():
                 f"Δβ5 {results['tip_adapter_b5']['signed_gap'] - zs:+.2f}  "
                 f"Δβ1 {results['tip_adapter_b1']['signed_gap'] - zs:+.2f}  "
                 f"ΔCoOp {results['coop']['signed_gap'] - zs:+.2f}  "
-                f"({time.time() - t0:.0f}s){mem}"
+                f"{ts_msg}  ({time.time() - t0:.0f}s){mem}"
             )
 
         write_rows(rows)

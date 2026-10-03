@@ -1,5 +1,6 @@
 import torch
 from tpt import tpt_entropy_loss
+import torch.nn.functional as F
 import torchvision.transforms as transforms
 from tqdm.auto import tqdm
 
@@ -146,6 +147,29 @@ def signed_gap(logits, labels):
     conf, pred = probs.max(dim=-1)
     acc = (pred == labels).float().mean().item()
     return (conf.mean().item() - acc) * 100  # positive = overconfident
+
+
+def fit_temperature(logits, labels, max_iter=100):
+    """One temperature T that minimises the NLL of logits / T. Optimised as log T.
+
+    Has no finite optimum when every logit row is already classified correctly
+    (NLL keeps falling as T -> 0), so callers check for errors first.
+    """
+    logits, labels = logits.detach().float(), labels.to(logits.device)
+    log_t = torch.zeros(1, device=logits.device, requires_grad=True)
+    optimizer = torch.optim.LBFGS(
+        [log_t], lr=0.1, max_iter=max_iter, line_search_fn="strong_wolfe"
+    )
+
+    def closure():
+        optimizer.zero_grad()
+        loss = F.cross_entropy(logits / log_t.exp(), labels)
+        loss.backward()
+        return loss
+
+    with torch.enable_grad():
+        optimizer.step(closure)
+    return log_t.exp().item()
 
 
 def logit_range(logits, labels):
