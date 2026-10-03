@@ -1,8 +1,9 @@
 """Runs every (dataset, seed) cell and merges the rows into results/grid.csv.
 
 Default: zero-shot, Tip-Adapter (β=5, β=1) and CoOp from cached features.
---tpt: single-template zero-shot baseline and TPT (2 augmentation runs) on
-500 test images per seed, opened through manifests/<dataset>.csv.
+--tpt: single-template zero-shot baseline and TPT on --tpt-n test images per
+seed (default 2,000, or the whole test split if smaller), one row per
+augmentation run in --tpt-runs, images opened through manifests/<dataset>.csv.
 """
 
 import argparse, csv, hashlib, json, random, subprocess, sys, time
@@ -47,8 +48,6 @@ RESULTS = REPO_ROOT / "results" / "grid.csv"
 CTX_DIR = REPO_ROOT / "features" / "coop"
 
 TPT_SEEDS = [42]
-TPT_N = 500
-TPT_RUNS = [0, 1]  # augmentation seeds; everything else identical
 TPT_CFG = {"n_views": 63, "lr": 0.005, "top_k": 0.1}
 SINGLE_TEMPLATE = "a photo of a {}."  # TPT's starting prompt, so the baseline is TPT before any update
 CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
@@ -110,16 +109,18 @@ def git_commit():
 
 
 def write_rows(new_rows):
-    """Replaces rows for the same (dataset, seed, method); keeps the rest."""
-    keys = {(r["dataset"], int(r["seed"]), r["method"]) for r in new_rows}
+    """Replaces rows for the same (dataset, seed, method, n_test); keeps the rest.
+    n_test is in the key so TPT rows at different sample sizes coexist.
+    """
+
+    def key(r):
+        return (r["dataset"], int(r["seed"]), r["method"], int(r["n_test"]))
+
+    keys = {key(r) for r in new_rows}
     old = []
     if RESULTS.exists():
         with open(RESULTS, newline="") as fh:
-            old = [
-                r
-                for r in csv.DictReader(fh)
-                if (r["dataset"], int(r["seed"]), r["method"]) not in keys
-            ]
+            old = [r for r in csv.DictReader(fh) if key(r) not in keys]
     fields = list(new_rows[0])
     for r in old:
         fields += [k for k in r if k not in fields]
@@ -160,7 +161,7 @@ def make_row(method, name, f, seed, n_test, metrics, params, gpu, commit, run=""
 
 
 class ManifestImages:
-    """Opens images lazily, so run_tpt never holds 500 full-size images in memory."""
+    """Opens images lazily, so run_tpt never holds the sample's full-size images in memory."""
 
     def __init__(self, refs, data_root):
         self.refs = refs
@@ -192,6 +193,8 @@ def run_tpt_cells(
     gpu,
     commit,
     data_root,
+    n,
+    runs,
 ):
     refs, manifest_labels = load_manifest(name)
     assert (
@@ -207,7 +210,7 @@ def run_tpt_cells(
         _, _, test_idx = split_indices(
             f["labels"].tolist(), seed=seed, n_cache=f["n_shot"], n_val=f["n_val"]
         )
-        sample = random.Random(seed).sample(test_idx, min(TPT_N, len(test_idx)))
+        sample = random.Random(seed).sample(test_idx, min(n, len(test_idx)))
         labels = f["labels"][sample]
 
         base = evaluate(
@@ -230,7 +233,7 @@ def run_tpt_cells(
         )
 
         images = ManifestImages([refs[i] for i in sample], data_root)
-        for run in TPT_RUNS:
+        for run in runs:
             t0 = time.time()
             if device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats()
@@ -322,6 +325,19 @@ def parse_args():
     p.add_argument(
         "--tpt", action="store_true", help="run the TPT cells instead of the grid"
     )
+    p.add_argument(
+        "--tpt-n",
+        type=int,
+        default=2000,
+        help="TPT test images per seed (capped at the test split size)",
+    )
+    p.add_argument(
+        "--tpt-runs",
+        nargs="+",
+        type=int,
+        default=[0],
+        help="TPT augmentation seeds, one row each",
+    )
     p.add_argument("--data-root", type=Path, default=REPO_ROOT.parent / "data")
     return p.parse_args()
 
@@ -358,6 +374,8 @@ def main():
                     gpu,
                     commit,
                     args.data_root,
+                    args.tpt_n,
+                    args.tpt_runs,
                 )
             )
             continue
