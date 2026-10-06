@@ -8,6 +8,7 @@ Manifests map cached feature indices to these refs; TPT opens images through the
 Named image_sources, not datasets, so it doesn't shadow HuggingFace `datasets`.
 """
 
+import collections
 import csv
 from functools import lru_cache
 from pathlib import Path
@@ -16,7 +17,7 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
-
+from imagenet_a_classes import A_KEPT_WNIDS, A_WNIDS, MIN_IMAGES, wnid_to_a_index
 from imagenet_r_classes import wnid_to_r_index
 
 IMG_EXT = {".jpg", ".jpeg", ".png"}
@@ -29,6 +30,7 @@ PACS_DIRS = {
 SKETCH_DIR = "sketch"
 V2_DIR = "imagenetv2-matched-frequency-format-val"
 PACS_ROOT = "pacs_data/pacs_data"
+A_REPO, A_SPLIT = "barkermrl/imagenet-a", "train"
 R_REPO, R_SPLIT = "axiong/imagenet-r", "test"
 MANIFEST_DIR = Path(__file__).resolve().parent.parent / "manifests"
 
@@ -70,6 +72,19 @@ def image_refs(name, data_root):
             for i, w in enumerate(ds["wnid"])
         ]
 
+    if name == "imagenet_a":
+        ds = _hf(A_REPO, A_SPLIT, str(data_root / "hf"))
+        assert ds.features["label"].names == A_WNIDS, "imagenet_a: label order differs"
+        wnids = [A_WNIDS[l] for l in ds["label"]]
+        counts = collections.Counter(wnids)
+        kept = sorted(w for w, c in counts.items() if c >= MIN_IMAGES)
+        assert kept == A_KEPT_WNIDS, "imagenet_a: kept classes differ from A_KEPT_WNIDS"
+        return [
+            (f"hf:{A_REPO}:{A_SPLIT}:{i}", wnid_to_a_index[w])
+            for i, w in enumerate(wnids)
+            if w in wnid_to_a_index
+        ]
+
     if name == "sketch_1000":
         wnids = _sorted_dirs(data_root / SKETCH_DIR)
         index = {w: i for i, w in enumerate(wnids)}
@@ -108,6 +123,16 @@ def load_manifest(name):
     return [r["ref"] for r in rows], [int(r["label"]) for r in rows]
 
 
+def write_manifest(name, refs):
+    """Manifest for a dataset encoded fresh in image_refs order: cache index i = refs[i]."""
+    MANIFEST_DIR.mkdir(exist_ok=True)
+    with open(MANIFEST_DIR / f"{name}.csv", "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["cache_index", "ref", "label", "cosine"])
+        for i, (ref, label) in enumerate(refs):
+            writer.writerow([i, ref, label, "1.000000"])
+
+
 class RefDataset(Dataset):
     def __init__(self, refs, data_root, preprocess):
         self.refs = refs
@@ -122,10 +147,14 @@ class RefDataset(Dataset):
 
 
 @torch.no_grad()
-def encode_images(model, preprocess, refs, data_root, device, batch_size=256, workers=8):
+def encode_images(
+    model, preprocess, refs, data_root, device, batch_size=256, workers=8
+):
     """Normalized image features for refs, in the given order, on CPU."""
     loader = DataLoader(
-        RefDataset(refs, data_root, preprocess), batch_size=batch_size, num_workers=workers
+        RefDataset(refs, data_root, preprocess),
+        batch_size=batch_size,
+        num_workers=workers,
     )
     out = []
     for i, x in enumerate(loader):

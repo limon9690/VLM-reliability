@@ -5,7 +5,8 @@ Usage:
     python scripts/encode_features.py --datasets pacs_photo
 
 Writes features/<cache>.pt (image features + labels) and the 80-template text
-features for each dataset. If a cache already exists it is NOT overwritten:
+feature for each dataset. A dataset with no manifest yet (a new dataset) gets one
+first, in image_refs order, so cache index i is image i. If a cache already exists it is NOT overwritten:
 the new encoding is compared against it instead (labels must match exactly,
 cosine should be ~1.0), which makes this a check of an existing cache too.
 --overwrite replaces existing caches.
@@ -23,7 +24,13 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from clip_zeroshot import MODEL_NAME, build_and_cache_text_features
 from features_registry import CLASS_NAMES, DATASETS, FEATURES_DIR
-from image_sources import encode_images, load_manifest
+from image_sources import (
+    MANIFEST_DIR,
+    encode_images,
+    image_refs,
+    load_manifest,
+    write_manifest,
+)
 from imagenet_classes import IMAGENET_TEMPLATES
 
 MIN_COS = 0.99  # two known images decode at 0.996-0.997; everything else is ~1.0
@@ -31,6 +38,10 @@ MIN_COS = 0.99  # two known images decode at 0.996-0.997; everything else is ~1.
 
 def image_cache(name, model, preprocess, device, args):
     path = FEATURES_DIR / f"{DATASETS[name]['images']}.pt"
+    if not (MANIFEST_DIR / f"{name}.csv").exists():
+        refs = image_refs(name, args.data_root)
+        write_manifest(name, refs)
+        print(f"  wrote manifests/{name}.csv ({len(refs)} images, image_refs order)")
     refs, labels = load_manifest(name)
     labels = torch.tensor(labels)
     feats = encode_images(

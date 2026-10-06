@@ -1,6 +1,7 @@
 from pathlib import Path
 from clip_zeroshot import load_cached_image_features, load_cached_text_features
 from imagenet_classes import IMAGENET_CLASS_NAMES
+from imagenet_a_classes import a_class_names
 from imagenet_r_classes import r_class_names
 
 FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
@@ -9,6 +10,7 @@ CLASS_NAMES = {
     "imagenet_r": r_class_names,
     "imagenet_1000": IMAGENET_CLASS_NAMES,
     "pacs": PACS_CLASS_NAMES,
+    "imagenet_a": a_class_names,
 }
 
 DATASETS = {
@@ -43,6 +45,14 @@ DATASETS = {
         "n_classes": 1000,
         "n_shot": 4,
         "n_val": 0,
+    },
+    "imagenet_a": {  # the 101 classes with >= 26 images (imagenet_a_classes.py)
+        "images": "a_all_features",
+        "text": "a_text_features",
+        "class_names": "imagenet_a",
+        "n_classes": 101,
+        "n_shot": 16,
+        "n_val": 10,
     },
     "pacs_photo": {
         "images": "pacs_photo",
