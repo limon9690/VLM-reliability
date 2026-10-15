@@ -40,6 +40,8 @@ MARKER = {
 }
 
 
+MIXED = {"clap": "CLAP"}
+
 EXPECTED_GSHOTS = {
     "tip_adapter": (27, 31),
     "tip_adapter_f": (31, 31),
@@ -68,7 +70,7 @@ MISS_COLOR = {
 HIT_COLOR = "#b9b8b1"
 
 
-def build_cells(grid):
+def build_cells(grid, kinds=KIND):
     """One row per (method, dataset, seed) cell, paired with its zero-shot start."""
     grid = grid[~((grid.method == "tip_adapter") & (grid.beta != 5))]
     zs = grid[grid.method == "zero_shot"].set_index(["dataset", "seed"])
@@ -79,7 +81,7 @@ def build_cells(grid):
     ), "expected one n=2,000 single-template row per dataset"
 
     rows = []
-    for method in KIND:
+    for method in kinds:
         adapted = grid[grid.method == method]
         if method == "tpt":
             adapted = adapted[adapted.n_test != 500]
@@ -94,7 +96,7 @@ def build_cells(grid):
             rows.append(
                 {
                     "method": method,
-                    "kind": KIND[method],
+                    "kind": kinds[method],
                     "dataset": a.dataset,
                     "seed": a.seed,
                     "g_shots": a.g_shots,
@@ -206,6 +208,34 @@ def report(cells):
         print(f"  {LABEL[method]:<20} {int(m.hit_loo.sum())}/{len(m)}")
 
 
+def score_mixed(grid):
+    cells = build_cells(grid, {m: "mixed" for m in MIXED})
+    cells["improved"] = cells.d_ece < 0
+    cells["hit_as_booster"] = (cells.g_shots < 0) == cells.improved
+    cells["hit_as_corrector"] = cells.improved
+    cells["loo_kind"] = [loo_kind(cells, c.method, c.dataset) for _, c in cells.iterrows()]
+    cells["hit_loo"] = [
+        forecast_better(k, c.g_shots) == c.improved
+        for k, (_, c) in zip(cells.loo_kind, cells.iterrows())
+    ]
+    for method, label in MIXED.items():
+        m = cells[cells.method == method]
+        over, under = m[m.g_test > 0], m[m.g_test < 0]
+        print(f"{label} (measured kind: mixed), {len(m)} cells")
+        print(f"  gap lowered from overconfident starts {int((over.delta < 0).sum())}/{len(over)}, "
+              f"from underconfident starts {int((under.delta < 0).sum())}/{len(under)}")
+        print(f"  forecast if called a booster   {int(m.hit_as_booster.sum())}/{len(m)}")
+        print(f"  forecast if called a corrector {int(m.hit_as_corrector.sum())}/{len(m)}")
+        print(f"  leave one dataset out          {int(m.hit_loo.sum())}/{len(m)} "
+              f"(kind measured as {', '.join(sorted(set(m.loo_kind)))})")
+        table = m.groupby("dataset").agg(
+            start=("g_test", "mean"), delta=("delta", "mean"), d_ece=("d_ece", "mean"),
+            improved=("improved", "sum"), n=("seed", "count"),
+        ).sort_values("start")
+        print(table.round(2).to_string())
+    return cells
+
+
 def plot(cells, x_col, x_label, path):
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.6), sharey=True)
     panels = [
@@ -294,6 +324,10 @@ def main():
     check_counts(cells)
     report(cells)
     print()
+    mixed = score_mixed(pd.read_csv(args.grid))
+    print()
+    mixed.round(4).to_csv(out_dir / "forecast_mixed.csv", index=False)
+    print(f"wrote {out_dir / 'forecast_mixed.csv'}")
 
     cells.round(4).to_csv(out_dir / "forecast_scores.csv", index=False)
     print(f"wrote {out_dir / 'forecast_scores.csv'}")
