@@ -5,6 +5,7 @@ Tip-Adapter-F, and SaLS on Tip-Adapter, CoOp and Tip-Adapter-F, from cached feat
 --tpt: single-template zero-shot baseline, TPT and TPT+SaLS on --tpt-n test images per
 seed (default 2,000, or the whole test split if smaller), one row per
 augmentation run in --tpt-runs, images opened through manifests/<dataset>.csv.
+--clap: CLAP rows only, from cached features; checks zero-shot against the existing rows.
 """
 
 import argparse, csv, hashlib, json, random, subprocess, sys, time
@@ -18,6 +19,7 @@ import torchvision.transforms as transforms
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from clap import raw_text_norms, train_clap
 from clip_zeroshot import MODEL_NAME
 from coop import (
     CTX_DIM,
@@ -45,6 +47,7 @@ from harness import (
     zero_shot_logits,
 )
 from image_sources import load_manifest, open_image
+from imagenet_classes import IMAGENET_TEMPLATES
 from splits import split_indices
 from tip_adapter_f import train_tip_adapter_f
 
@@ -79,6 +82,7 @@ TIP_F_CFG = {
     "batch_size": 256,
     "leave_one_out": True,
 }
+CLAP_CFG = {"epochs": 300, "lr": 0.1, "momentum": 0.9, "batch_size": 256, "warmup_lr": 1e-5}
 
 METRICS = {
     "accuracy": accuracy,
@@ -386,6 +390,60 @@ def run_tpt_cells(
     return rows
 
 
+def run_clap_cells(name, f, seeds, model, tokenizer, logit_scale, device, gpu, commit):
+    norms, rebuilt = raw_text_norms(
+        model, tokenizer, f["class_names"], IMAGENET_TEMPLATES, device
+    )
+    cos = (rebuilt * f["text_features"].float()).sum(dim=0)
+    assert cos.min() > 0.999, f"{name}: rebuilt text features differ from cache ({cos.min():.4f})"
+
+    with open(RESULTS, newline="") as fh:
+        frozen = {
+            (r["dataset"], int(r["seed"])): r
+            for r in csv.DictReader(fh)
+            if r["method"] == "zero_shot"
+        }
+
+    rows = []
+    for seed in seeds:
+        cache_idx, _, test_idx = split_indices(
+            f["labels"].tolist(), seed=seed, n_cache=f["n_shot"], n_val=f["n_val"]
+        )
+        shot_feats = f["image_features"][cache_idx]
+        shot_labels = f["labels"][cache_idx].to(device)
+        shot_logits = zero_shot_logits(shot_feats, f["text_features"], logit_scale)
+        g_shots = signed_gap(shot_logits, shot_labels)
+        n_shot_errors = (shot_logits.argmax(dim=-1) != shot_labels).sum().item()
+
+        test_feats = f["image_features"][test_idx]
+        labels = f["labels"][test_idx].to(device)
+        zs = evaluate(zero_shot_logits(test_feats, f["text_features"], logit_scale), labels, METRICS)
+        ref = frozen[(name, seed)]
+        assert int(ref["n_test"]) == len(test_idx), f"{name} seed {seed}: test split differs"
+        for k in ("accuracy", "signed_gap", "ece"):
+            assert abs(zs[k] - float(ref[k])) < 1e-3, f"{name} seed {seed}: zero-shot {k} differs"
+
+        protos, stats = train_clap(
+            shot_feats, shot_labels, shot_logits, f["text_features"], norms,
+            logit_scale, seed=seed, device=device, **CLAP_CFG,
+        )
+        r = evaluate(zero_shot_logits(test_feats, protos, logit_scale), labels, METRICS)
+        rows.append(
+            make_row(
+                "clap", name, f, seed, len(test_idx), r, CLAP_CFG, gpu, commit,
+                g_shots=g_shots, n_shot_errors=n_shot_errors,
+            )
+        )
+        print(
+            f"{name:13s} seed {seed}  g_shots {g_shots:+.2f}  ZS gap {zs['signed_gap']:+.2f}  "
+            f"ΔCLAP {r['signed_gap'] - zs['signed_gap']:+.2f}  "
+            f"ECE {zs['ece']:.2f} → {r['ece']:.2f}  acc {zs['accuracy']:.2f} → {r['accuracy']:.2f}  "
+            f"CE {stats['ce_start']:.3f} → {stats['ce_end']:.3f}  drift {stats['drift']:.3f}  "
+            f"λ {stats['lambda_mean']:.3f}  norm {norms.mean():.2f}  ({stats['seconds']:.0f}s)"
+        )
+    return rows
+
+
 def load_or_train_ctx(name, seed, f, cache_idx, model, tokenizer, device):
     """Reuses a saved context only if it was trained under the same settings."""
     path = CTX_DIR / f"coop_ctx_{name}_seed{seed}.pt"
@@ -441,8 +499,14 @@ def parse_args():
         default=[0],
         help="TPT augmentation seeds, one row each",
     )
+    p.add_argument(
+        "--clap", action="store_true", help="run the CLAP cells instead of the grid"
+    )
     p.add_argument("--data-root", type=Path, default=REPO_ROOT.parent / "data")
-    return p.parse_args()
+    args = p.parse_args()
+    if args.tpt and args.clap:
+        p.error("--tpt and --clap are separate runs")
+    return args
 
 
 def main():
@@ -479,6 +543,14 @@ def main():
                     args.data_root,
                     args.tpt_n,
                     args.tpt_runs,
+                )
+            )
+            continue
+        if args.clap:
+            seeds = args.seeds or SEEDS.get(name, DEFAULT_SEEDS)
+            write_rows(
+                run_clap_cells(
+                    name, f, seeds, model, tokenizer, logit_scale, device, gpu, commit
                 )
             )
             continue
