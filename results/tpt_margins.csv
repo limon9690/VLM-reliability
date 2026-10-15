@@ -1,0 +1,5 @@
+dataset,method,n,acc_diff_vs_grid,gap_diff_vs_grid,acc,conf,gap,range,margin_top2,margin_top5,top1_minus_median,std
+imagenet_r,zero_shot_single,2000,0.0,0.0,75.15,70.491,-4.659,17.8736,2.8167,3.9583,10.6586,2.737
+imagenet_r,tpt,2000,0.0,0.0,78.25,81.297,3.047,18.3906,3.9858,5.1003,11.5547,2.6412
+imagenet_a,zero_shot_single,2000,0.0,0.0,52.9,59.8587,6.9587,16.6884,1.7566,2.8746,9.1851,3.0681
+imagenet_a,tpt,2000,0.0,0.0,60.9,73.0442,12.1442,17.1513,2.8089,3.9467,10.0079,2.9963
