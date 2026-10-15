@@ -32,16 +32,19 @@ from coop import (
 from features_registry import DATASETS, load_features
 from harness import (
     accuracy,
+    brier,
     coop_logits,
     ece,
     evaluate,
     fit_temperature,
     logit_range,
+    nll,
     run_comparison,
     sals,
     run_tpt,
     tip_adapter_f_logits,
     signed_gap,
+    t_star,
     tip_adapter_logits,
     with_sals,
     zero_shot_logits,
@@ -89,6 +92,9 @@ METRICS = {
     "ece": ece,
     "signed_gap": signed_gap,
     "logit_range": logit_range,
+    "brier": brier,
+    "nll": nll,
+    "t_star": t_star,
 }
 METHODS = {
     "zero_shot": {"method": "zero_shot", "fn": zero_shot_logits, "params": {}},

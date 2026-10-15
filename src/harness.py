@@ -197,6 +197,22 @@ def fit_temperature(logits, labels, max_iter=100):
     return log_t.exp().item()
 
 
+def brier(logits, labels):
+    probs = logits.softmax(dim=-1)
+    onehot = F.one_hot(labels.to(logits.device), probs.shape[-1]).float()
+    return (probs - onehot).pow(2).sum(dim=-1).mean().item()
+
+
+def nll(logits, labels):
+    return F.cross_entropy(logits.float(), labels.to(logits.device)).item()
+
+
+def t_star(logits, labels):
+    if (logits.argmax(dim=-1) == labels.to(logits.device)).all():
+        return float("nan")
+    return fit_temperature(logits, labels)
+
+
 def sals(logits, ref_logits):
     """SaLS (Murugesan et al., ECCV 2024): rescale each image's logits to the
     range of its reference logits, l' = (R_ref / R_l) * (l - min l) + min ref.
