@@ -160,13 +160,29 @@ def git_commit():
         return "unknown"
 
 
-def write_rows(new_rows):
-    """Replaces rows for the same (dataset, seed, method, n_test); keeps the rest.
-    n_test is in the key so TPT rows at different sample sizes coexist.
-    """
+def row_key(r):
+    return (
+        r["dataset"],
+        int(r["seed"]),
+        r["method"],
+        int(r["n_test"]),
+        str(r["run"]),
+        str(r["beta"]),
+    )
 
-    def key(r):
-        return (r["dataset"], int(r["seed"]), r["method"], int(r["n_test"]))
+
+def read_rows():
+    if not RESULTS.exists():
+        return {}
+    with open(RESULTS, newline="") as fh:
+        return {row_key(r): r for r in csv.DictReader(fh)}
+
+
+def write_rows(new_rows):
+    """Replaces rows for the same (dataset, seed, method, n_test, run, beta); keeps the rest.
+    n_test, run and beta are in the key so TPT sample sizes, TPT runs and Tip-Adapter doses coexist.
+    """
+    key = row_key
 
     keys = {key(r) for r in new_rows}
     old = []
@@ -273,6 +289,7 @@ def run_tpt_cells(
         p.requires_grad_(False)
     single_text = single_template_text(model, tokenizer, f["class_names"], device)
     text_encoder = TextEncoderWrapper(model)
+    existing = read_rows()
 
     rows = []
     for seed in seeds:
@@ -295,21 +312,28 @@ def run_tpt_cells(
         )
         base = evaluate(base_logits, labels.to(device), METRICS)
 
-        rows.append(
-            make_row(
-                "zero_shot_single",
-                name,
-                f,
-                seed,
-                len(sample),
-                base,
-                {"template": SINGLE_TEMPLATE},
-                gpu,
-                commit,
-                g_shots=g_shots,
-                n_shot_errors=n_shot_errors,
+        ref = existing.get((name, seed, "zero_shot_single", len(sample), "", ""))
+        if ref is None:
+            rows.append(
+                make_row(
+                    "zero_shot_single",
+                    name,
+                    f,
+                    seed,
+                    len(sample),
+                    base,
+                    {"template": SINGLE_TEMPLATE},
+                    gpu,
+                    commit,
+                    g_shots=g_shots,
+                    n_shot_errors=n_shot_errors,
+                )
             )
-        )
+        else:
+            for k in ("accuracy", "signed_gap", "ece"):
+                assert (
+                    abs(base[k] - float(ref[k])) < 1e-3
+                ), f"{name} seed {seed}: zero_shot_single {k} differs from grid"
 
         images = ManifestImages([refs[i] for i in sample], data_root)
         for run in runs:
