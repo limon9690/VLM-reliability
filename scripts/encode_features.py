@@ -1,8 +1,9 @@
 """Encodes images in manifest order into the feature caches run_grid.py reads.
 
 Usage:
-    python scripts/encode_features.py                     # all 8 datasets
+    python scripts/encode_features.py                     # all 9 datasets
     python scripts/encode_features.py --datasets pacs_photo
+    VLM_BACKBONE=rn50 python scripts/encode_features.py   # writes features/rn50/
 
 Writes features/<cache>.pt (image features + labels) and the 80-template text
 feature for each dataset. A dataset with no manifest yet (a new dataset) gets one
@@ -112,7 +113,7 @@ def main():
     )
     model = model.to(device).eval()
     tokenizer = open_clip.get_tokenizer(MODEL_NAME)
-    FEATURES_DIR.mkdir(exist_ok=True)
+    FEATURES_DIR.mkdir(parents=True, exist_ok=True)
 
     ok = True
     for name in args.datasets:

@@ -1,7 +1,7 @@
 import torch
 from tqdm.auto import tqdm
 
-MODEL_NAME = "ViT-B-16-quickgelu"
+from backbones import MODEL_NAME
 
 
 def build_and_cache_text_features(

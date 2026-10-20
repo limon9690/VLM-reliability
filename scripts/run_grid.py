@@ -6,6 +6,7 @@ Tip-Adapter-F, and SaLS on Tip-Adapter, CoOp and Tip-Adapter-F, from cached feat
 seed (default 2,000, or the whole test split if smaller), one row per
 augmentation run in --tpt-runs, images opened through manifests/<dataset>.csv.
 --clap: CLAP rows only, from cached features; checks zero-shot against the existing rows.
+VLM_BACKBONE=rn50: RN50 features, CoOp contexts and results/grid_rn50.csv (src/backbones.py).
 """
 
 import argparse, csv, hashlib, json, random, subprocess, sys, time
@@ -19,6 +20,7 @@ import torchvision.transforms as transforms
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from backbones import FEATURES_DIR, GRID
 from clap import raw_text_norms, train_clap
 from clip_zeroshot import MODEL_NAME
 from coop import (
@@ -56,8 +58,8 @@ from tip_adapter_f import train_tip_adapter_f
 
 SEEDS = {"imagenet_r": [42, 43, 44, 45, 46], "sketch_200": [42, 43, 44, 45, 46]}
 DEFAULT_SEEDS = [42, 43, 44]
-RESULTS = REPO_ROOT / "results" / "grid.csv"
-CTX_DIR = REPO_ROOT / "features" / "coop"
+RESULTS = GRID
+CTX_DIR = FEATURES_DIR / "coop"
 
 TPT_SEEDS = [42]
 TPT_CFG = {"n_views": 63, "lr": 0.005, "top_k": 0.1}
@@ -189,6 +191,9 @@ def write_rows(new_rows):
     if RESULTS.exists():
         with open(RESULTS, newline="") as fh:
             old = [r for r in csv.DictReader(fh) if key(r) not in keys]
+    models = {r["model_name"] for r in old + new_rows}
+    if models != {MODEL_NAME}:
+        raise SystemExit(f"{RESULTS.name} would mix models {sorted(models)}; refusing to write")
     fields = list(new_rows[0])
     for r in old:
         fields += [k for k in r if k not in fields]
@@ -261,7 +266,7 @@ class ManifestImages:
 
 @torch.no_grad()
 def single_template_text(model, tokenizer, class_names, device):
-    """(512, n_classes), the same layout as the cached ensembled text features."""
+    """(embed_dim, n_classes), the same layout as the cached ensembled text features."""
     tokens = tokenizer([SINGLE_TEMPLATE.format(c) for c in class_names]).to(device)
     return F.normalize(model.encode_text(tokens), dim=-1).T
 

@@ -1,10 +1,9 @@
-from pathlib import Path
+from backbones import FEATURES_DIR
 from clip_zeroshot import load_cached_image_features, load_cached_text_features
 from imagenet_classes import IMAGENET_CLASS_NAMES
 from imagenet_a_classes import a_class_names
 from imagenet_r_classes import r_class_names
 
-FEATURES_DIR = Path(__file__).resolve().parent.parent / "features"
 PACS_CLASS_NAMES = ["dog", "elephant", "giraffe", "guitar", "horse", "house", "person"]
 CLASS_NAMES = {
     "imagenet_r": r_class_names,
